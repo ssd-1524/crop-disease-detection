@@ -1,89 +1,78 @@
-Maize Health AI: Disease Detection & Severity Analysis
-Maize Health AI is a full-stack web application designed to help farmers and researchers identify and quantify diseases in maize (corn) leaves. Users can upload an image of a maize leaf, and the application's AI backend will classify the disease, if any, and calculate the severity of the infection through image segmentation.
+# Crop Disease Detection: Disease Detection & Severity Analysis
 
-✨ Features
-User Authentication: Secure login and signup functionality powered by Supabase.
+Full-stack web application designed to help farmers and researchers identify and quantify diseases in maize (corn) leaves. Users can upload an image of a maize leaf, and the application's AI backend will classify the disease, if any, and calculate the severity of the infection through image segmentation.
 
-Protected Routes: Only authenticated users can access the analysis dashboard.
+## ✨ Features
 
-Image Upload: A sleek, user-friendly interface to upload maize leaf images.
+- **User Authentication**: Secure login and signup functionality powered by Supabase.
+- **Protected Routes**: Only authenticated users can access the analysis dashboard.
+- **Image Upload**: A sleek, user-friendly interface to upload maize leaf images.
+- **AI-Powered Analysis**:
+    - **Disease Classification**: Identifies between Blight, Common Rust, Gray Leaf Spot, or a Healthy leaf.
+    - **Severity Calculation**: Segments the diseased area to calculate the percentage of the leaf affected.
+- **Informative Dashboard**: Displays the prediction, confidence score, and severity percentage in a clean and readable format.
 
-AI-Powered Analysis:
+## 📸 Screenshots
 
-Disease Classification: Identifies between Blight, Common Rust, Gray Leaf Spot, or a Healthy leaf.
+*(You can replace these placeholders with your actual screenshots)*
 
-Severity Calculation: Segments the diseased area to calculate the percentage of the leaf affected.
-
-Informative Dashboard: Displays the prediction, confidence score, and severity percentage in a clean and readable format.
-
-📸 Screenshots
-(You can replace these placeholders with your actual screenshots)
-
-Landing Page
+**Landing Page**
 ``
 
-Login / Signup Form
+---
+
+**Login / Signup Form**
 ``
 
-Analysis Dashboard (Before Upload)
+---
+
+**Analysis Dashboard (Before Upload)**
 ``
 
-Analysis Dashboard (After Result)
+---
+
+**Analysis Dashboard (After Result)**
 ``
 
-🛠️ Technology Stack
-Area
+## 🛠️ Technology Stack
 
-Technology
+| Area      | Technology                                    |
+| :-------- | :-------------------------------------------- |
+| **Frontend** | Next.js (React), Tailwind CSS, Shadcn/ui      |
+| **Backend** | FastAPI (Python)                              |
+| **Database & Auth** | Supabase (PostgreSQL, Auth, Storage)        |
+| **ML Models** | TensorFlow, Keras                             |
 
-Frontend
+## 🧠 Machine Learning Models
 
-Next.js (React), Tailwind CSS, Shadcn/ui
-
-Backend
-
-FastAPI (Python)
-
-Database & Auth
-
-Supabase (PostgreSQL, Auth, Storage)
-
-ML Models
-
-TensorFlow, Keras
-
-🧠 Machine Learning Models
 The core of this application is its two-stage AI pipeline that processes each uploaded image.
 
-MobileNetV2 (Classification)
+1.  **MobileNetV2 (Classification)**
+    - **Role**: This model acts as the first-stage classifier. It's a lightweight and highly efficient convolutional neural network (CNN) that has been fine-tuned on thousands of images to recognize the visual patterns of different maize leaf diseases.
+    - **Output**: It predicts the most likely class for the leaf: `Blight`, `Common Rust`, `Gray Leaf Spot`, or `Healthy`.
 
-Role: This model acts as the first-stage classifier. It's a lightweight and highly efficient convolutional neural network (CNN) that has been fine-tuned on thousands of images to recognize the visual patterns of different maize leaf diseases.
+2.  **U-Net (Segmentation & Severity)**
+    - **Role**: If a disease is detected by MobileNetV2, the image is passed to the U-Net model. U-Net is a specialized CNN architecture designed for precise image segmentation. It generates a pixel-by-pixel "mask" of the image, highlighting only the areas affected by the disease.
+    - **Output**: A binary mask of the leaf. The application then calculates the ratio of diseased pixels to total pixels to determine the severity percentage.
 
-Output: It predicts the most likely class for the leaf: Blight, Common Rust, Gray Leaf Spot, or Healthy.
+3.  **Meta's SAM (Potential Enhancement)**
+    - **Role**: The Segment Anything Model (SAM) from Meta AI is a state-of-the-art foundation model for image segmentation. It could be integrated as an alternative or an enhancement to U-Net to achieve even higher-precision segmentation of diseased areas, especially in complex images with varied lighting or backgrounds.
 
-U-Net (Segmentation & Severity)
+## 🚀 How to Run This Project Locally
 
-Role: If a disease is detected by MobileNetV2, the image is passed to the U-Net model. U-Net is a specialized CNN architecture designed for precise image segmentation. It generates a pixel-by-pixel "mask" of the image, highlighting only the areas affected by the disease.
-
-Output: A binary mask of the leaf. The application then calculates the ratio of diseased pixels to total pixels to determine the severity percentage.
-
-Meta's SAM (Potential Enhancement)
-
-Role: The Segment Anything Model (SAM) from Meta AI is a state-of-the-art foundation model for image segmentation. It could be integrated as an alternative or an enhancement to U-Net to achieve even higher-precision segmentation of diseased areas, especially in complex images with varied lighting or backgrounds.
-
-🚀 How to Run This Project Locally
 Follow these instructions to set up and run the project on your local machine.
 
-Prerequisites
-Node.js (v18 or later)
+### Prerequisites
 
-Python (v3.9 or later) & pip
+- [Node.js](https://nodejs.org/en/) (v18 or later)
+- [Python](https://www.python.org/downloads/) (v3.9 or later) & `pip`
+- A [Supabase](https://supabase.com/) account (for API keys and storage)
 
-A Supabase account (for API keys and storage)
+### 1. Backend Setup (FastAPI)
 
-1. Backend Setup (FastAPI)
 First, get the Python backend server running.
 
+```bash
 # 1. Navigate to the backend directory
 cd backend/
 
@@ -104,12 +93,14 @@ pip install -r requirements.txt
 
 # 5. Run the backend server
 uvicorn main:app --reload
+```
+Your backend API should now be running at `http://127.0.0.1:8000`.
 
-Your backend API should now be running at http://127.0.0.1:8000.
+### 2. Frontend Setup (Next.js)
 
-2. Frontend Setup (Next.js)
-In a new terminal window, set up and run the frontend.
+In a **new terminal window**, set up and run the frontend.
 
+```bash
 # 1. Navigate to the frontend directory
 cd frontend/
 
@@ -127,10 +118,13 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=YOUR_SUPABASE_ANON_KEY
 
 # 4. Run the frontend development server
 npm run dev
+```
 
-Your frontend application should now be running at http://localhost:3000. You can open this URL in your browser to use the application.
+Your frontend application should now be running at `http://localhost:3000`. You can open this URL in your browser to use the application.
 
-📁 Project Structure
+## 📁 Project Structure
+
+```
 .
 ├── backend/
 │   ├── main.py                 # FastAPI application logic
