@@ -1,0 +1,10 @@
+fastapi
+uvicorn[standard]
+tensorflow
+numpy
+Pillow
+opencv-python-headless
+python-multipart
+segment-anything
+opencv-python
+matplotlib

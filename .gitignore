@@ -1,0 +1,11 @@
+# Virtual environment
+backend/venv/
+backend/__pycache__/
+
+# IDE and OS files
+.vscode/
+.idea/
+.DS_Store
+
+# Environment variables
+.env
