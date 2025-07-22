@@ -18,28 +18,28 @@ Full-stack web application designed to help farmers and researchers identify and
 
 **Landing Page**
 
-``
+
 <img width="2694" height="1494" alt="Screenshot 2025-07-22 172526" src="https://github.com/user-attachments/assets/3587dd7e-d20b-428b-863f-95155ce41055" />
 
 ---
 
 **Login / Signup Form**
 
-``
+
 <img width="2700" height="1488" alt="Screenshot 2025-07-22 172600" src="https://github.com/user-attachments/assets/ea3c3d26-4814-49c2-9718-ba7387445f9d" />
 
 ---
 
 **Analysis Dashboard (Before Upload)**
 
-``
+
 <img width="2736" height="1490" alt="Screenshot 2025-07-22 172706" src="https://github.com/user-attachments/assets/118d7ab0-4eaf-4548-a14b-7a29535914a2" />
 
 ---
 
 **Analysis Dashboard (After Result)**
 
-``
+
 <img width="2736" height="1490" alt="Screenshot 2025-07-22 171827" src="https://github.com/user-attachments/assets/8a178b04-8ae0-4896-96b1-78c43b143a59" />
 <img width="2736" height="1490" alt="Screenshot 2025-07-22 173110" src="https://github.com/user-attachments/assets/798c4314-4bad-43cf-8bdf-617a579cf6c0" />
 
