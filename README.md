@@ -14,7 +14,6 @@ Full-stack web application designed to help farmers and researchers identify and
 
 ## 📸 Screenshots
 
-*(You can replace these placeholders with your actual screenshots)*
 
 **Landing Page**
 
