@@ -84,7 +84,8 @@ export default function ImageUploader() {
 
       const formData = new FormData();
       formData.append("file", file);
-      const response = await fetch("http://127.0.0.1:8000/predict", {
+      const apiUrl = `${process.env.NEXT_PUBLIC_API_URL}/predict`;
+      const response = await fetch(apiUrl, {
         method: "POST",
         body: formData,
       });
