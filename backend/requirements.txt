@@ -8,3 +8,5 @@ python-multipart
 segment-anything
 opencv-python
 matplotlib
+torch
+torchvision

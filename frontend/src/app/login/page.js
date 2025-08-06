@@ -2,9 +2,9 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-// Import the new client creator function
-import { createClient } from "@/lib/supabase/client";
+import { createClient } from "@/lib/supabase/client"; // <-- Use the correct client
 import { Button } from "@/components/ui/button";
+import { toast } from "sonner";
 import {
   Card,
   CardContent,
@@ -19,22 +19,21 @@ export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const router = useRouter();
-  // Create a new supabase instance
   const supabase = createClient();
 
   const handleSignUp = async () => {
-    const { error } = await supabase.auth.signUp({
+    await supabase.auth.signUp({
       email,
       password,
+      options: {
+        emailRedirectTo: `${location.origin}/auth/callback`,
+      },
     });
-    if (error) {
-      alert(error.message);
-    } else {
-      alert("Check your email for the confirmation link!");
-      router.refresh();
-    }
+    toast.success("You are signed up!");
+    router.refresh();
   };
 
+  // In src/app/login/page.js
   const handleLogin = async () => {
     const { error } = await supabase.auth.signInWithPassword({
       email,
@@ -42,16 +41,17 @@ export default function LoginPage() {
     });
 
     if (error) {
-      alert(error.message);
+      toast.error(error.message);
     } else {
-      // Just pushing to the new route is enough now.
-      // The new client handles the session cookie correctly.
+      toast.success("Login successful!");
+      // The AuthContext will automatically detect the login and update the navbar.
+      // We just need to navigate.
       router.push("/dashboard");
     }
   };
 
   return (
-    <div className="flex items-center justify-center min-h-screen bg-gray-50">
+    <div className="flex items-center justify-center min-h-screen">
       <Card className="w-full max-w-sm">
         <CardHeader>
           <CardTitle className="text-2xl">Login / Sign Up</CardTitle>
@@ -82,10 +82,17 @@ export default function LoginPage() {
             />
           </div>
           <div className="flex flex-col gap-2 pt-2">
-            <Button onClick={handleLogin} className="w-full">
+            <Button
+              onClick={handleLogin}
+              className="w-full transition-transform hover:scale-105"
+            >
               Login
             </Button>
-            <Button onClick={handleSignUp} variant="outline" className="w-full">
+            <Button
+              onClick={handleSignUp}
+              variant="outline"
+              className="w-full transition-transform hover:scale-105"
+            >
               Sign up
             </Button>
           </div>
