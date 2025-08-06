@@ -120,3 +120,23 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* Add this to the bottom of globals.css */
+
+.animated-gradient {
+  background: linear-gradient(-45deg, #e0f2fe, #dcfce7, #f3e8ff, #e0f2fe);
+  background-size: 400% 400%;
+  animation: gradient 15s ease infinite;
+}
+
+@keyframes gradient {
+  0% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0% 50%;
+  }
+}
