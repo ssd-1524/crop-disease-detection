@@ -84,7 +84,11 @@ export default function ImageUploader() {
 
       const formData = new FormData();
       formData.append("file", file);
-      const apiUrl = `${process.env.NEXT_PUBLIC_API_URL}/predict`;
+
+      // --- CHANGE IS HERE ---
+      // Point directly to your manually-run local backend
+      const apiUrl = "http://127.0.0.1:8000/predict";
+
       const response = await fetch(apiUrl, {
         method: "POST",
         body: formData,
@@ -107,7 +111,7 @@ export default function ImageUploader() {
         confidence: analysisResult.confidence,
         severity_percentage: analysisResult.severity_percentage,
         severity_label: analysisResult.severity_label,
-        sam_mask_image: analysisResult.sam_mask_image, // <-- Save the new mask data
+        sam_mask_image: analysisResult.sam_mask_image,
       });
 
       if (insertError) throw new Error(insertError.message);
@@ -229,7 +233,6 @@ export default function ImageUploader() {
                 </p>
               </div>
 
-              {/* --- NEW: Display SAM Mask Image --- */}
               {result.sam_mask_image && (
                 <div>
                   <p className="text-sm text-gray-500 flex items-center gap-2 mb-2">
