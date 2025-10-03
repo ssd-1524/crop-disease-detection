@@ -2,13 +2,7 @@
 
 import { useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -21,12 +15,13 @@ import {
 import { Progress } from "@/components/ui/progress";
 import { toast } from "sonner";
 
+// A simple spinner component for loading states
 const Spinner = () => (
   <svg
     xmlns="http://www.w3.org/2000/svg"
     width="24"
     height="24"
-    viewBox="0 0 24 24"
+    viewBox="0 0 24"
     fill="none"
     stroke="currentColor"
     strokeWidth="2"
@@ -51,7 +46,7 @@ export default function ImageUploader() {
     if (selectedFile) {
       setFile(selectedFile);
       setPreview(URL.createObjectURL(selectedFile));
-      setResult(null);
+      setResult(null); // Reset previous results
       setError(null);
     }
   };
@@ -61,6 +56,11 @@ export default function ImageUploader() {
     setPreview(null);
     setResult(null);
     setError(null);
+    // Also reset the file input visually
+    const input = document.getElementById("leaf-image-input");
+    if (input) {
+      input.value = "";
+    }
   };
 
   const handleAnalyze = async () => {
@@ -68,59 +68,65 @@ export default function ImageUploader() {
 
     setIsLoading(true);
     setError(null);
+    setResult(null); // Clear previous results before new analysis
 
     try {
+      // 1. Authenticate user
       const {
         data: { user },
       } = await supabase.auth.getUser();
       if (!user)
         throw new Error("Authentication Error: You must be logged in.");
 
+      // 2. Upload original image to Supabase Storage
       const filePath = `${user.id}/${Date.now()}_${file.name}`;
       const { error: uploadError } = await supabase.storage
         .from("maize-images")
         .upload(filePath, file);
-      if (uploadError) throw new Error("Failed to upload image to storage.");
+      if (uploadError) throw new Error(`Storage Error: ${uploadError.message}`);
 
+      // 3. Send image to the backend API for analysis
       const formData = new FormData();
       formData.append("file", file);
 
-      // --- CHANGE IS HERE ---
-      // Point directly to your manually-run local backend
-      const apiUrl = "http://127.0.0.1:8000/predict";
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL
+        ? `${process.env.NEXT_PUBLIC_API_URL}/predict`
+        : "http://127.0.0.1:8000/predict";
 
       const response = await fetch(apiUrl, {
         method: "POST",
         body: formData,
       });
 
-      if (!response.ok) throw new Error("Analysis API request failed.");
+      if (!response.ok) {
+        throw new Error(
+          `Analysis API request failed with status: ${response.status}`
+        );
+      }
 
       const analysisResult = await response.json();
       if (analysisResult.error) throw new Error(analysisResult.error);
 
       setResult(analysisResult);
 
-      const {
-        data: { publicUrl },
-      } = supabase.storage.from("maize-images").getPublicUrl(filePath);
-
+      // 4. Save the analysis results to the database
       const { error: insertError } = await supabase.from("analyses").insert({
         image_path: filePath,
         prediction: analysisResult.prediction,
         confidence: analysisResult.confidence,
         severity_percentage: analysisResult.severity_percentage,
         severity_label: analysisResult.severity_label,
-        sam_mask_image: analysisResult.sam_mask_image,
       });
 
-      if (insertError) throw new Error(insertError.message);
+      if (insertError)
+        throw new Error(`Database Error: ${insertError.message}`);
 
       toast.success("Analysis complete and results saved!");
     } catch (error) {
       console.error("A critical error occurred in handleAnalyze:", error);
-      setError(error.message);
-      toast.error(error.message);
+      const errorMessage = error.message || "An unknown error occurred.";
+      setError(errorMessage);
+      toast.error(errorMessage);
     } finally {
       setIsLoading(false);
     }
@@ -133,71 +139,70 @@ export default function ImageUploader() {
 
   return (
     <div className="w-full max-w-4xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-8">
+      {/* --- Uploader Card --- */}
       <Card className="transition-all hover:shadow-lg hover:-translate-y-1">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <UploadCloud className="w-6 h-6" /> Upload Leaf Image
           </CardTitle>
         </CardHeader>
-        <CardContent>
-          <div className="space-y-4">
-            <div className="h-64 border-2 border-dashed rounded-lg flex items-center justify-center text-center bg-gray-50/50">
-              {preview ? (
-                <div className="relative">
-                  <img
-                    src={preview}
-                    alt="Image preview"
-                    className="max-h-60 object-contain rounded-md"
-                  />
-                  <Button
-                    variant="destructive"
-                    size="icon"
-                    className="absolute -top-2 -right-2 h-7 w-7 rounded-full"
-                    onClick={handleClear}
-                  >
-                    <X className="h-4 w-4" />
-                  </Button>
-                </div>
-              ) : (
-                <p className="text-gray-500">Image preview will appear here</p>
-              )}
-            </div>
-            <Input
-              id="picture"
-              type="file"
-              accept="image/*"
-              onChange={handleFileChange}
-              className="cursor-pointer"
-            />
-            <Button
-              onClick={handleAnalyze}
-              disabled={!file || isLoading}
-              className="w-full flex items-center justify-center gap-2"
-            >
-              {isLoading ? (
-                <>
-                  <Spinner /> Analyzing...
-                </>
-              ) : (
-                "Analyze Image"
-              )}
-            </Button>
-            {error && (
-              <p className="text-red-500 text-sm text-center">{error}</p>
+        <CardContent className="space-y-4">
+          <div className="h-64 border-2 border-dashed rounded-lg flex items-center justify-center text-center bg-gray-50/50 p-2">
+            {preview ? (
+              <div className="relative">
+                <img
+                  src={preview}
+                  alt="Image preview"
+                  className="max-h-60 object-contain rounded-md"
+                />
+                <Button
+                  variant="destructive"
+                  size="icon"
+                  className="absolute -top-2 -right-2 h-7 w-7 rounded-full"
+                  onClick={handleClear}
+                  aria-label="Clear image"
+                >
+                  <X className="h-4 w-4" />
+                </Button>
+              </div>
+            ) : (
+              <p className="text-gray-500">Image preview will appear here</p>
             )}
           </div>
+          <Input
+            id="leaf-image-input"
+            type="file"
+            accept="image/jpeg, image/png"
+            onChange={handleFileChange}
+            className="cursor-pointer"
+          />
+          <Button
+            onClick={handleAnalyze}
+            disabled={!file || isLoading}
+            className="w-full flex items-center justify-center gap-2"
+          >
+            {isLoading ? (
+              <>
+                <Spinner /> Analyzing...
+              </>
+            ) : (
+              "Analyze Image"
+            )}
+          </Button>
+          {error && <p className="text-red-500 text-sm text-center">{error}</p>}
         </CardContent>
       </Card>
 
+      {/* --- Results Card --- */}
       <Card className="transition-all hover:shadow-lg hover:-translate-y-1">
         <CardHeader>
           <CardTitle>Analysis Result</CardTitle>
         </CardHeader>
         <CardContent>
           {isLoading ? (
-            <div className="flex flex-col items-center justify-center h-full gap-4">
+            <div className="flex flex-col items-center justify-center h-full gap-4 text-gray-500">
               <Spinner />
-              <p className="text-gray-500">Loading results...</p>
+              <p>Performing AI analysis...</p>
             </div>
           ) : result ? (
             <div className="space-y-4">
@@ -207,7 +212,7 @@ export default function ImageUploader() {
                   <div>
                     <p className="text-sm text-gray-500">Prediction</p>
                     <p className="text-2xl font-bold">
-                      {result.prediction.replace("_", " ")}
+                      {result.prediction.replace(/_/g, " ")}
                     </p>
                   </div>
                 </div>
@@ -217,31 +222,33 @@ export default function ImageUploader() {
                 </div>
               </div>
 
-              <div>
-                <p className="text-sm text-gray-500">Severity</p>
-                <div className="flex items-center gap-4">
-                  <Progress
-                    value={result.severity_percentage}
-                    className="w-full"
-                  />
-                  <span className="font-bold text-lg">
-                    {result.severity_percentage}%
-                  </span>
+              {result.prediction !== "Healthy" && (
+                <div>
+                  <p className="text-sm text-gray-500">Severity</p>
+                  <div className="flex items-center gap-4">
+                    <Progress
+                      value={result.severity_percentage}
+                      className="w-full"
+                    />
+                    <span className="font-bold text-lg">
+                      {result.severity_percentage}%
+                    </span>
+                  </div>
+                  <p className="text-right font-medium text-gray-600 mt-1">
+                    {result.severity_label}
+                  </p>
                 </div>
-                <p className="text-right font-medium text-gray-600">
-                  {result.severity_label}
-                </p>
-              </div>
+              )}
 
               {result.sam_mask_image && (
                 <div>
                   <p className="text-sm text-gray-500 flex items-center gap-2 mb-2">
                     <BrainCircuit className="w-4 h-4" />
-                    AI Detected Area (SAM Mask)
+                    AI Detected Area (Visual Overlay)
                   </p>
-                  <div className="bg-gray-900 rounded-lg p-2">
+                  <div className="bg-gray-900 rounded-lg p-1">
                     <img
-                      src={`data:image/png;base64,${result.sam_mask_image}`}
+                      src={`data:image/jpeg;base64,${result.sam_mask_image}`}
                       alt="SAM segmentation mask"
                       className="rounded-md w-full h-auto"
                     />
