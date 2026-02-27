@@ -2,143 +2,258 @@ import os
 import cv2
 import numpy as np
 import base64
+import io
+import torch
+import torch.nn as nn
+from torchvision.models import mobilenet_v2, MobileNet_V2_Weights
+from torchvision import transforms
 from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-import torch
-from segment_anything import sam_model_registry, SamPredictor
-import onnxruntime as ort
+from sam2.build_sam import build_sam2
+from sam2.sam2_image_predictor import SAM2ImagePredictor
 from PIL import Image
 import uvicorn
-import io
 
-# --- 1. Application Setup ---
+# ── 1. App Setup ───────────────────────────────────────────────────────────────
 app = FastAPI()
 
-origins = [
-    "http://localhost:3000",
-    "https://crop-disease-detection-tau.vercel.app/"
-]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
+    allow_origins=[
+        "http://localhost:3000",
+        "https://crop-disease-detection-tau.vercel.app/",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# --- 2. Load Models (Assuming they were downloaded during the build step) ---
-SAM_CHECKPOINT_FILENAME = "sam_vit_b_01ec64.pth"
-CLASSIFIER_FILENAME = "mobilenet_classifier.onnx"
+# ── 2. Model Definitions ───────────────────────────────────────────────────────
+CLASS_NAMES = ["Blight", "Common_Rust", "Gray_Leaf_Spot", "Healthy"]
 
-# Load SAM model
-device = "cuda" if torch.cuda.is_available() else "cpu"
-sam_model = sam_model_registry["vit_b"](checkpoint=SAM_CHECKPOINT_FILENAME)
-sam_model.to(device=device)
-sam_predictor = SamPredictor(sam_model)
-print("SAM model loaded successfully.")
 
-# Load ONNX Classification model
-ort_session = ort.InferenceSession(CLASSIFIER_FILENAME)
-print("ONNX classification model loaded successfully.")
+class CustomMobileNetV2_3(nn.Module):
+    def __init__(self, num_classes=4, dropout_rate=0.2):
+        super().__init__()
+        weights = MobileNet_V2_Weights.DEFAULT
+        self.model = mobilenet_v2(weights=weights)
 
-CLASS_NAMES = ['Blight', 'Common_Rust', 'Gray_Leaf_Spot', 'Healthy']
+        for param in self.model.features.parameters():
+            param.requires_grad = False
 
-# --- 3. Helper Functions (These remain the same) ---
-def create_color_mask(image_bgr):
-    hsv = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2HSV)
-    yellow_lower = np.array([15, 50, 50])
-    yellow_upper = np.array([35, 255, 255])
-    yellow_mask = cv2.inRange(hsv, yellow_lower, yellow_upper)
-    brown_lower = np.array([5, 50, 20])
-    brown_upper = np.array([20, 255, 200])
-    brown_mask = cv2.inRange(hsv, brown_lower, brown_upper)
-    red_lower1 = np.array([0, 120, 70])
-    red_upper1 = np.array([10, 255, 255])
-    red_lower2 = np.array([170, 120, 70])
-    red_upper2 = np.array([180, 255, 255])
-    red_mask1 = cv2.inRange(hsv, red_lower1, red_upper1)
-    red_mask2 = cv2.inRange(hsv, red_lower2, red_upper2)
-    red_mask = cv2.bitwise_or(red_mask1, red_mask2)
-    diseased_mask = cv2.bitwise_or(yellow_mask, brown_mask)
-    diseased_mask = cv2.bitwise_or(diseased_mask, red_mask)
-    kernel = np.ones((3,3), np.uint8)
-    diseased_mask = cv2.morphologyEx(diseased_mask, cv2.MORPH_CLOSE, kernel)
-    diseased_mask = cv2.morphologyEx(diseased_mask, cv2.MORPH_OPEN, kernel)
-    return diseased_mask
+        in_features = self.model.classifier[1].in_features
+        self.model.classifier = nn.Sequential(
+            nn.Dropout(p=dropout_rate),
+            nn.Linear(in_features, num_classes),
+        )
+        nn.init.xavier_uniform_(self.model.classifier[1].weight)
+        nn.init.zeros_(self.model.classifier[1].bias)
 
-def mask_to_boxes(mask):
-    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    boxes = [cv2.boundingRect(c) for c in contours]
-    return np.array([[x, y, x + w, y + h] for x, y, w, h in boxes]) if boxes else None
+    def forward(self, x):
+        return self.model(x)
 
-def segment_leaf_with_sam(image_rgb, predictor):
-    predictor.set_image(image_rgb)
-    h, w, _ = image_rgb.shape
-    input_point = np.array([[w // 2, h // 2]])
-    input_label = np.array([1])
-    masks, scores, _ = predictor.predict(
-        point_coords=input_point, point_labels=input_label, multimask_output=True
+
+# ── 3. Load Models ─────────────────────────────────────────────────────────────
+CLASSIFIER_FILENAME = "CustomMobileNetV2_2_best.pth"
+SAM2_CHECKPOINT = "sam2.1_hiera_large.pt"
+SAM2_CONFIG = "configs/sam2.1/sam2.1_hiera_l.yaml"
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+# Classification model
+classifier = CustomMobileNetV2_3(num_classes=len(CLASS_NAMES))
+classifier.load_state_dict(torch.load(CLASSIFIER_FILENAME, map_location=device))
+classifier.to(device)
+classifier.eval()
+print("Classifier loaded successfully.")
+
+# SAM2 predictor
+sam2_model = build_sam2(SAM2_CONFIG, SAM2_CHECKPOINT, device=device)
+sam_predictor = SAM2ImagePredictor(sam2_model)
+print("SAM2 loaded successfully.")
+
+# Preprocessing transform for classifier
+preprocess = transforms.Compose(
+    [
+        transforms.Resize((224, 224)),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+    ]
+)
+
+
+# ── 4. Helper Functions ────────────────────────────────────────────────────────
+def classify_image(img_rgb: np.ndarray) -> tuple[str, str]:
+    """Run classifier and return (class_name, confidence_str)."""
+    img_pil = Image.fromarray(img_rgb)
+    tensor = preprocess(img_pil).unsqueeze(0).to(device)
+    with torch.inference_mode():
+        logits = classifier(tensor)
+        probs = torch.softmax(logits, dim=1)[0]
+    pred_idx = probs.argmax().item()
+    confidence = f"{probs[pred_idx].item() * 100:.2f}%"
+    return CLASS_NAMES[pred_idx], confidence
+
+
+def segment_full_leaf(img_rgb: np.ndarray) -> np.ndarray:
+    """
+    SAM2: segment the entire leaf using center positive points
+    and corner negative points.
+    Returns binary uint8 mask (H, W).
+    """
+    h, w = img_rgb.shape[:2]
+    cx, cy = w // 2, h // 2
+
+    pos_points = np.array(
+        [
+            [cx, cy],
+            [cx - w // 6, cy],
+            [cx + w // 6, cy],
+            [cx, cy - h // 6],
+            [cx, cy + h // 6],
+        ],
+        dtype=np.float32,
     )
-    return masks[np.argmax(scores)]
+    neg_points = np.array(
+        [
+            [10, 10],
+            [w - 10, 10],
+            [10, h - 10],
+            [w - 10, h - 10],
+        ],
+        dtype=np.float32,
+    )
 
-# --- 4. Main Prediction Endpoint ---
+    points = np.concatenate([pos_points, neg_points], axis=0)
+    labels = np.array([1] * len(pos_points) + [0] * len(neg_points), dtype=np.int32)
+
+    sam_predictor.set_image(img_rgb)
+    with torch.inference_mode():
+        masks, scores, _ = sam_predictor.predict(
+            point_coords=points,
+            point_labels=labels,
+            multimask_output=True,
+        )
+    return masks[np.argmax(scores)].astype(np.uint8)
+
+
+def create_color_mask_within_leaf(
+    img_rgb: np.ndarray, leaf_mask: np.ndarray
+) -> np.ndarray:
+    """
+    Colour threshold for yellow/orange/brown/red disease regions,
+    constrained inside the leaf boundary.
+    Returns binary uint8 mask (H, W).
+    """
+    img_bgr = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2BGR)
+    hsv = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2HSV)
+
+    yellow = cv2.inRange(hsv, np.array([15, 50, 50]), np.array([35, 255, 255]))
+    brown = cv2.inRange(hsv, np.array([5, 50, 20]), np.array([20, 255, 200]))
+    red1 = cv2.inRange(hsv, np.array([0, 120, 70]), np.array([10, 255, 255]))
+    red2 = cv2.inRange(hsv, np.array([170, 120, 70]), np.array([180, 255, 255]))
+
+    combined = yellow | brown | red1 | red2
+
+    # Constrain to leaf only
+    combined = cv2.bitwise_and(combined, combined, mask=leaf_mask)
+
+    kernel = np.ones((3, 3), np.uint8)
+    combined = cv2.morphologyEx(combined, cv2.MORPH_CLOSE, kernel)
+    combined = cv2.morphologyEx(combined, cv2.MORPH_OPEN, kernel)
+    return combined
+
+
+def calculate_severity(leaf_mask: np.ndarray, disease_mask: np.ndarray) -> dict:
+    """
+    Compute severity and return metrics + disease-on-leaf mask.
+    """
+    leaf_u8 = (leaf_mask > 0).astype(np.uint8)
+    disease_u8 = (disease_mask > 0).astype(np.uint8)
+
+    disease_on_leaf = cv2.bitwise_and(disease_u8, leaf_u8)
+    leaf_area = int(np.count_nonzero(leaf_u8))
+    disease_area = int(np.count_nonzero(disease_on_leaf))
+    severity_pct = round(disease_area / leaf_area * 100, 2) if leaf_area > 0 else 0.0
+
+    if severity_pct < 5:
+        label = "Mild"
+    elif severity_pct < 15:
+        label = "Moderate"
+    else:
+        label = "Severe"
+
+    return {
+        "leaf_area_px": leaf_area,
+        "disease_area_px": disease_area,
+        "severity_pct": severity_pct,
+        "severity_label": label,
+        "disease_on_leaf_mask": disease_on_leaf,
+    }
+
+
+def encode_overlay(img_rgb: np.ndarray, disease_mask: np.ndarray) -> str:
+    """Burn disease mask onto image and return base64-encoded JPEG."""
+    overlay = img_rgb.copy()
+    overlay[disease_mask > 0] = (
+        overlay[disease_mask > 0] * 0.4 + np.array([255, 0, 0]) * 0.6
+    ).astype(np.uint8)
+    pil_img = Image.fromarray(overlay)
+    buffered = io.BytesIO()
+    pil_img.save(buffered, format="JPEG", quality=90)
+    return base64.b64encode(buffered.getvalue()).decode("utf-8")
+
+
+# ── 5. Prediction Endpoint ─────────────────────────────────────────────────────
 @app.post("/predict")
 async def predict(file: UploadFile = File(...)):
     try:
         contents = await file.read()
         nparr = np.frombuffer(contents, np.uint8)
         img_bgr = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        if img_bgr is None:
+            raise HTTPException(status_code=400, detail="Invalid image file.")
         img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
 
-        # Classification with ONNX model
-        img_pil = Image.fromarray(img_rgb).resize((224, 224))
-        img_array = np.array(img_pil, dtype=np.float32)[np.newaxis, ...]
-        input_name = ort_session.get_inputs()[0].name
-        ort_outs = ort_session.run(None, {input_name: img_array})
-        scores = ort_outs[0][0]
-        prediction = CLASS_NAMES[np.argmax(scores)]
-        confidence = f"{np.max(scores) * 100:.2f}%"
+        # Step 1 — Classification
+        prediction, confidence = classify_image(img_rgb)
 
-        severity_percentage, severity_label, final_overlay_encoded = 0, "N/A", None
+        # Defaults for healthy leaf
+        severity_pct = 0.0
+        severity_label = "N/A"
+        overlay_b64 = None
 
-        if prediction != 'Healthy':
-            leaf_mask = segment_leaf_with_sam(img_rgb, sam_predictor)
-            leaf_area = np.sum(leaf_mask)
-            if leaf_area > 0:
-                initial_disease_mask = create_color_mask(img_bgr)
-                disease_boxes = mask_to_boxes(initial_disease_mask)
-                combined_disease_mask = np.zeros_like(leaf_mask, dtype=bool)
-                if disease_boxes is not None:
-                    sam_predictor.set_image(img_rgb)
-                    for box in disease_boxes:
-                        masks, _, _ = sam_predictor.predict(box=box, multimask_output=False)
-                        combined_disease_mask = np.logical_or(combined_disease_mask, masks[0])
-                
-                disease_on_leaf_mask = np.logical_and(leaf_mask, combined_disease_mask)
-                disease_area = np.sum(disease_on_leaf_mask)
-                severity_percentage = round((disease_area / leaf_area) * 100, 2)
-                
-                if severity_percentage < 5: severity_label = "Mild"
-                elif 5 <= severity_percentage < 15: severity_label = "Moderate"
-                else: severity_label = "Severe"
+        if prediction != "Healthy":
+            # Step 2 — SAM2 leaf segmentation
+            leaf_mask = segment_full_leaf(img_rgb)
 
-                overlay = img_rgb.copy()
-                overlay[disease_on_leaf_mask] = [255, 0, 0]
-                final_overlay_pil = Image.fromarray(overlay)
-                buffered = io.BytesIO()
-                final_overlay_pil.save(buffered, format="JPEG")
-                final_overlay_encoded = base64.b64encode(buffered.getvalue()).decode("utf-8")
+            if np.count_nonzero(leaf_mask) > 0:
+                # Step 3 — Colour threshold inside leaf
+                disease_mask = create_color_mask_within_leaf(img_rgb, leaf_mask)
+
+                # Step 4 — Severity
+                metrics = calculate_severity(leaf_mask, disease_mask)
+                severity_pct = metrics["severity_pct"]
+                severity_label = metrics["severity_label"]
+
+                # Step 5 — Overlay image
+                overlay_b64 = encode_overlay(img_rgb, metrics["disease_on_leaf_mask"])
 
         return {
-            "prediction": prediction, "confidence": confidence,
-            "severity_percentage": severity_percentage, "severity_label": severity_label,
-            "sam_mask_image": final_overlay_encoded,
+            "prediction": prediction,
+            "confidence": confidence,
+            "severity_percentage": severity_pct,
+            "severity_label": severity_label,
+            "sam_mask_image": overlay_b64,
         }
+
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-# For Render deployment
+
+# ── 6. Entry Point ─────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
     uvicorn.run(app, host="0.0.0.0", port=port)
-

@@ -4,71 +4,111 @@ import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Progress } from "@/components/ui/progress";
 import {
   ArrowLeft,
   CheckCircle,
   AlertTriangle,
   BrainCircuit,
+  Calendar,
+  Percent,
+  FlaskConical,
 } from "lucide-react";
 import Link from "next/link";
 
+// ── Skeleton ───────────────────────────────────────────────────────────────────
+const SkeletonBlock = ({ className }) => (
+  <div className={`animate-pulse rounded-lg bg-gray-200 ${className}`} />
+);
+
 const SkeletonLoader = () => (
-  <div className="animate-pulse">
-    <div className="h-8 w-1/3 rounded bg-gray-300 mb-8"></div>
+  <div className="space-y-8">
+    <SkeletonBlock className="h-7 w-40" />
     <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-      <div className="w-full h-96 rounded-lg bg-gray-300"></div>
-      <div className="space-y-8">
-        <div className="h-12 w-3/4 rounded bg-gray-300"></div>
-        <div className="h-8 w-1/2 rounded bg-gray-300"></div>
-        <div className="h-10 w-full rounded bg-gray-300"></div>
-        <div className="h-8 w-1/2 rounded bg-gray-300"></div>
+      <SkeletonBlock className="h-96 w-full" />
+      <div className="space-y-6">
+        <SkeletonBlock className="h-12 w-3/4" />
+        <SkeletonBlock className="h-8 w-1/2" />
+        <SkeletonBlock className="h-10 w-full" />
+        <SkeletonBlock className="h-8 w-1/3" />
+        <SkeletonBlock className="h-8 w-2/3" />
       </div>
     </div>
   </div>
 );
 
+// ── Severity helpers (mirrors ImageUploader) ───────────────────────────────────
+const getSeverityColor = (label) => {
+  switch (label) {
+    case "Mild":     return "text-yellow-500";
+    case "Moderate": return "text-orange-500";
+    case "Severe":   return "text-red-600";
+    default:         return "text-gray-400";
+  }
+};
+
+const getSeverityBarColor = (pct) => {
+  if (pct < 5)  return "bg-yellow-400";
+  if (pct < 15) return "bg-orange-500";
+  return "bg-red-600";
+};
+
+// ── Stat row ───────────────────────────────────────────────────────────────────
+const StatRow = ({ icon: Icon, label, children }) => (
+  <div className="flex items-start gap-3">
+    <div className="mt-0.5 w-8 h-8 rounded-lg bg-gray-100 flex items-center justify-center flex-shrink-0">
+      <Icon className="w-4 h-4 text-gray-500" />
+    </div>
+    <div className="flex-1 min-w-0">
+      <p className="text-xs text-gray-400 uppercase tracking-wide mb-0.5">{label}</p>
+      {children}
+    </div>
+  </div>
+);
+
+// ── Main page ──────────────────────────────────────────────────────────────────
 export default function AnalysisDetailPage() {
-  const params = useParams();
-  const id = params.id;
+  const params   = useParams();
+  const id       = params.id;
+  const supabase = createClient();
 
   const [analysis, setAnalysis] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const supabase = createClient();
+  const [loading,  setLoading ] = useState(true);
+  const [error,    setError   ] = useState(null);
 
   useEffect(() => {
     const fetchAnalysis = async () => {
       if (!id) return;
-
       setLoading(true);
-      const { data, error } = await supabase
+
+      const { data, error: fetchError } = await supabase
         .from("analyses")
         .select("*")
         .eq("id", id)
         .single();
 
-      if (error) {
-        console.error("Error fetching analysis:", error);
+      if (fetchError) {
+        console.error("Error fetching analysis:", fetchError);
         setError("Failed to load analysis details.");
-      } else {
-        const { data: urlData, error: urlError } = await supabase.storage
-          .from("maize-images")
-          .createSignedUrl(data.image_path, 3600); // URL valid for 1 hour
-
-        if (urlError) {
-          setError("Failed to load image.");
-          setAnalysis({ ...data, signedImageUrl: null });
-        } else {
-          setAnalysis({ ...data, signedImageUrl: urlData.signedUrl });
-        }
+        setLoading(false);
+        return;
       }
+
+      // Signed URL — non-fatal if it fails
+      const { data: urlData, error: urlError } = await supabase.storage
+        .from("maize-images")
+        .createSignedUrl(data.image_path, 3600);
+
+      setAnalysis({
+        ...data,
+        signedImageUrl: urlError ? null : urlData.signedUrl,
+      });
       setLoading(false);
     };
 
     fetchAnalysis();
-  }, [id, supabase]);
+  }, [id]);   // ← removed `supabase` from deps (stable client reference)
 
+  // ── Loading ────────────────────────────────────────────────────────────────
   if (loading) {
     return (
       <div className="container mx-auto p-4 md:p-8 pt-24">
@@ -77,98 +117,124 @@ export default function AnalysisDetailPage() {
     );
   }
 
+  // ── Error ──────────────────────────────────────────────────────────────────
   if (error || !analysis) {
     return (
       <div className="container mx-auto p-4 md:p-8 pt-24 text-center">
-        <Link
-          href="/dashboard"
-          className="flex items-center gap-2 text-sm text-gray-500 hover:text-gray-800 mb-6 justify-center"
-        >
-          <ArrowLeft className="w-4 h-4" />
-          Back to Dashboard
-        </Link>
-        <p className="text-red-500">{error || "Analysis not found."}</p>
+        <BackLink />
+        <div className="mt-12 flex flex-col items-center gap-3 text-gray-500">
+          <AlertTriangle className="w-10 h-10 text-red-400" />
+          <p className="text-red-500 font-medium">{error ?? "Analysis not found."}</p>
+        </div>
       </div>
     );
   }
 
-  const ResultIcon =
-    analysis.prediction === "Healthy" ? CheckCircle : AlertTriangle;
-  const resultColor =
-    analysis.prediction === "Healthy" ? "text-green-500" : "text-orange-500";
+  const isHealthy      = analysis.prediction === "Healthy";
+  const ResultIcon     = isHealthy ? CheckCircle : AlertTriangle;
+  const resultColor    = isHealthy ? "text-green-500" : "text-orange-500";
+  const severityColor  = getSeverityColor(analysis.severity_label);
+  const showSeverity   = !isHealthy && analysis.severity_percentage != null;
+  const formattedDate  = new Date(analysis.created_at).toLocaleString(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  });
+
+  // ── Replace underscores for display ───────────────────────────────────────
+  const predictionLabel = analysis.prediction?.replace(/_/g, " ") ?? "—";
 
   return (
     <div className="container mx-auto p-4 md:p-8 pt-24">
-      <Link
-        href="/dashboard"
-        className="flex items-center gap-2 text-sm text-gray-500 hover:text-gray-800 mb-6"
-      >
-        <ArrowLeft className="w-4 h-4" />
-        Back to Dashboard
-      </Link>
+      <BackLink />
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-8 items-start">
-        <Card>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-8 items-start mt-6">
+
+        {/* ── Image Card ──────────────────────────────────────────────────── */}
+        <Card className="overflow-hidden">
           <CardHeader>
-            <CardTitle>Uploaded Image</CardTitle>
+            <CardTitle className="text-base">Uploaded Image</CardTitle>
           </CardHeader>
-          <CardContent>
+          <CardContent className="p-0">
             {analysis.signedImageUrl ? (
               <img
                 src={analysis.signedImageUrl}
-                alt="Analyzed leaf"
-                className="w-full h-auto rounded-lg object-cover"
+                alt={`Leaf image — ${predictionLabel}`}
+                className="w-full h-auto object-cover"
               />
             ) : (
-              <div className="w-full h-96 rounded-lg bg-gray-200 flex items-center justify-center">
-                Image not available
+              <div className="w-full h-72 bg-gray-100 flex flex-col items-center
+                justify-center gap-2 text-gray-400">
+                <BrainCircuit className="w-8 h-8 text-gray-300" />
+                <p className="text-sm">Image unavailable</p>
               </div>
             )}
           </CardContent>
         </Card>
 
+        {/* ── Details Card ────────────────────────────────────────────────── */}
         <Card>
           <CardHeader>
-            <CardTitle>Analysis Details</CardTitle>
+            <CardTitle className="text-base">Analysis Details</CardTitle>
           </CardHeader>
           <CardContent className="space-y-6">
-            <div className="flex items-center gap-3">
-              <ResultIcon className={`w-12 h-12 ${resultColor}`} />
+
+            {/* Prediction */}
+            <div className="flex items-center gap-4 p-4 rounded-xl bg-gray-50">
+              <ResultIcon className={`w-12 h-12 flex-shrink-0 ${resultColor}`} />
               <div>
-                <p className="text-sm text-gray-500">Prediction</p>
-                <p className="text-3xl font-bold">
-                  {analysis.prediction?.replace("_", " ")}
-                </p>
+                <p className="text-xs text-gray-400 uppercase tracking-wide">Prediction</p>
+                <p className="text-2xl font-bold leading-tight">{predictionLabel}</p>
               </div>
             </div>
-            <div>
-              <p className="text-sm text-gray-500">Confidence</p>
-              <p className="text-2xl font-semibold">{analysis.confidence}</p>
-            </div>
-            <div>
-              <p className="text-sm text-gray-500">Severity</p>
-              <Progress
-                value={analysis.severity_percentage}
-                className="w-full mt-2 h-3"
-              />
-              <div className="flex justify-between items-center mt-1">
-                <span className="font-medium text-gray-600">
-                  {analysis.severity_label}
-                </span>
-                <span className="text-2xl font-semibold">
-                  {analysis.severity_percentage}%
-                </span>
-              </div>
-            </div>
-            <div>
-              <p className="text-sm text-gray-500">Analyzed On</p>
-              <p className="text-lg">
-                {new Date(analysis.created_at).toLocaleString()}
-              </p>
-            </div>
+
+            {/* Confidence */}
+            <StatRow icon={FlaskConical} label="Confidence">
+              <p className="text-xl font-semibold">{analysis.confidence}</p>
+            </StatRow>
+
+            {/* Severity — hidden for Healthy */}
+            {showSeverity && (
+              <StatRow icon={Percent} label="Disease Severity">
+                <div className="space-y-2 mt-1">
+                  <div className="w-full bg-gray-200 rounded-full h-3 overflow-hidden">
+                    <div
+                      className={`h-3 rounded-full transition-all duration-700
+                        ${getSeverityBarColor(analysis.severity_percentage)}`}
+                      style={{ width: `${analysis.severity_percentage}%` }}
+                    />
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className={`text-sm font-semibold ${severityColor}`}>
+                      {analysis.severity_label}
+                    </span>
+                    <span className="text-xl font-bold">
+                      {analysis.severity_percentage}%
+                    </span>
+                  </div>
+                </div>
+              </StatRow>
+            )}
+
+            {/* Date */}
+            <StatRow icon={Calendar} label="Analysed On">
+              <p className="text-base">{formattedDate}</p>
+            </StatRow>
+
           </CardContent>
         </Card>
       </div>
     </div>
   );
 }
+
+// ── Back link ──────────────────────────────────────────────────────────────────
+const BackLink = () => (
+  <Link
+    href="/dashboard"
+    className="inline-flex items-center gap-2 text-sm text-gray-500
+      hover:text-gray-900 transition-colors"
+  >
+    <ArrowLeft className="w-4 h-4" />
+    Back to Dashboard
+  </Link>
+);
