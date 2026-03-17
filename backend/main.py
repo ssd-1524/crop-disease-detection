@@ -104,176 +104,244 @@ def classify_image_with_tta(img_rgb: np.ndarray, n_augments: int = 6) -> tuple[s
 
 # ── 4. Disease colour profiles ─────────────────────────────────────────────────
 #
-# Each profile drives create_color_mask_within_leaf().
-# Per-disease fields:
-#   hsv_ranges          – list of (lower, upper) HSV bounds to OR together
-#   lab_ranges          – same in CIELAB
-#   exclude_green_s_min – saturation floor for the green-pixel exclusion mask
-#   morph_close_k       – closing kernel size (fills holes in lesions)
-#   morph_open_k        – opening kernel size (0 = skip; small = keep tiny spots)
-#   use_green_departure – enable adaptive desaturation detector (blight only)
-#   departure_sensitivity
+# Fixed HSV/LAB ranges catch clear-cut cases.
+# Adaptive local-contrast detectors (see Section 5) handle the rest:
+#   Common Rust  → _detect_rust_local_contrast()
+#   Gray Leaf Spot → _detect_gls_local_contrast()
 #
-# Common Rust — key insight
-# ─────────────────────────
-# Rust pustules span a wide colour continuum:
-#   • Very early (urediniospores emerging):  bright orange  H≈18-28, S≈120-255
-#   • Typical mature pustule:                orange-brown   H≈8-18,  S≈80-220
-#   • Old / dried pustule:                   dark reddish   H≈0-10,  S≈40-140
-#   • Senescent / chlorotic halo around pustule: yellow     H≈22-32, S≈50-160
-# The previous profile only covered the "typical" band and missed early & old.
-# We now add three extra HSV windows plus a LAB window for the dark-brown range.
-# Crucially we also run _detect_rust_warm_anomaly() for anything the fixed
-# ranges still miss.
+# morph_open_k = 0  → opening disabled (would erase tiny rust pustules)
 
 DISEASE_COLOR_PROFILES = {
     "Blight": {
         "hsv_ranges": [
-            (np.array([10, 50, 80]),  np.array([25, 200, 220])),   # tan/brown
-            (np.array([5,  40, 40]),  np.array([15, 180, 160])),   # dark edge
+            (np.array([10, 50, 80]),  np.array([25, 200, 220])),
+            (np.array([5,  40, 40]),  np.array([15, 180, 160])),
         ],
         "lab_ranges": [
-            (np.array([60, 133, 145]), np.array([170, 155, 180])),  # warm brown
+            (np.array([60, 133, 145]), np.array([170, 155, 180])),
         ],
-        "exclude_green_s_min":  55,
-        "morph_close_k":        5,
-        "morph_open_k":         3,
-        "use_green_departure":  True,
+        "exclude_green_s_min":   55,
+        "morph_close_k":         5,
+        "morph_open_k":          3,
+        "use_green_departure":   True,
         "departure_sensitivity": 0.30,
     },
     "Common_Rust": {
+        # Fixed ranges kept as a fast first-pass; local-contrast detector
+        # runs in addition and catches everything lighting shifts hide.
         "hsv_ranges": [
-            # ── Core rust colours ──────────────────────────────────────────
-            (np.array([8,  80,  60]),  np.array([22, 255, 255])),   # bright orange-brown
-            (np.array([0,  50,  40]),  np.array([8,  220, 200])),   # dark reddish-brown
-            (np.array([170, 50, 40]),  np.array([180, 255, 200])),  # red wrap-around
-            # ── Early-stage / chlorotic halo ───────────────────────────────
-            (np.array([18, 60, 100]),  np.array([32, 200, 255])),   # yellow-orange
-            # ── Dried / old pustules ───────────────────────────────────────
-            (np.array([5,  30,  30]),  np.array([15, 130, 150])),   # very dark brown
+            (np.array([5,  25, 30]),   np.array([25, 255, 255])),  # full orange-brown sweep
+            (np.array([0,  20, 25]),   np.array([8,  200, 180])),  # dark reddish
+            (np.array([170, 20, 25]),  np.array([180, 200, 180])), # red wrap-around
         ],
         "lab_ranges": [
-            (np.array([40, 138, 148]), np.array([200, 178, 200])),  # orange in LAB
-            (np.array([20, 128, 132]), np.array([110, 155, 165])),  # dark brown in LAB
+            (np.array([30, 135, 140]), np.array([220, 185, 210])),  # orange (wide)
+            (np.array([15, 128, 130]), np.array([130, 162, 172])),  # dark brown
         ],
-        "exclude_green_s_min": 45,   # slightly more permissive than other diseases
-        "morph_close_k":       3,    # small — fills micro-holes without merging spots
-        "morph_open_k":        0,    # DISABLED — opening erases tiny pustules
-        "use_green_departure": False,
-        "use_rust_anomaly":    True,  # enable adaptive warm-colour detector
+        "exclude_green_s_min":  40,
+        "morph_close_k":        3,
+        "morph_open_k":         0,   # MUST stay 0 — opening kills tiny pustules
+        "use_green_departure":  False,
+        "use_rust_local":       True,
     },
     "Gray_Leaf_Spot": {
         "hsv_ranges": [
-            (np.array([15, 20, 100]),  np.array([28, 80,  210])),  # tan/straw interior
-            (np.array([5,  30,  50]),  np.array([18, 140, 160])),  # brown necrotic
-            (np.array([0,  0,  150]),  np.array([25, 18,  255])),  # pale/white centre
+            (np.array([10, 15, 90]),   np.array([30, 90, 220])),   # tan/straw
+            (np.array([5,  25, 45]),   np.array([20, 150, 165])),  # brown necrotic
+            (np.array([0,  0,  140]),  np.array([30, 22,  255])),  # pale centre
         ],
         "lab_ranges": [
-            (np.array([85, 128, 140]), np.array([160, 145, 165])),  # warm in LAB
+            (np.array([80, 126, 138]), np.array([165, 148, 168])),
         ],
-        "exclude_green_s_min": 35,
-        "morph_close_k":       5,
-        "morph_open_k":        3,
-        "use_green_departure": False,
+        "exclude_green_s_min":  30,
+        "morph_close_k":        5,
+        "morph_open_k":         3,
+        "use_green_departure":  False,
+        "use_gls_local":        True,
     },
 }
 
 
-# ── 5. Colour mask helpers ─────────────────────────────────────────────────────
+# ── 5. Adaptive local-contrast detectors ──────────────────────────────────────
+#
+# Why local contrast instead of (or in addition to) fixed thresholds?
+# ────────────────────────────────────────────────────────────────────
+# Fixed HSV/LAB ranges encode the *absolute* colour of a lesion, which drifts
+# with camera white-balance, exposure, and disease stage.  Local-contrast
+# detectors instead ask "is this pixel anomalous relative to its immediate
+# neighbourhood?" — a question that is largely invariant to global lighting.
+#
+#   Rust  → each pustule is a locally WARMER (orange/red) spot vs green tissue
+#            → detect via positive deviation of LAB a* and b* from local mean
+#   GLS   → each lesion is a locally LESS SATURATED (grayer) zone vs green tissue
+#            → detect via negative deviation of HSV S from local mean
 
-def _detect_rust_warm_anomaly(
+
+def _detect_rust_local_contrast(
     img_rgb: np.ndarray,
     leaf_mask: np.ndarray,
-    sigma_threshold: float = 2.8,
-    min_neighbourhood_score: float = 1.2,
+    local_kernel: int = 13,
+    warmth_threshold: float = 7.0,
+    neib_threshold: float = 3.5,
 ) -> np.ndarray:
     """
-    Adaptive warm-colour anomaly detector specifically for Common Rust.
+    Detect Common Rust pustules via local LAB colour contrast.
 
-    Rust pustules are always anomalously warm (orange-brown) compared to the
-    surrounding green leaf tissue.  This function:
+    A rust pustule is always anomalously warm (orange-red) relative to the
+    surrounding green tissue, regardless of absolute lighting.
 
-      1. Samples "healthy green" pixels from the leaf to build a per-image
-         reference model of healthy tissue colour in CIELAB (mean a*, mean b*,
-         std a*, std b*).
+    Algorithm
+    ─────────
+    1. Compute local mean LAB colour using a Gaussian blur (sigma ≈ kernel/3).
+       The kernel size sets the spatial scale of "local" — 13 px works well for
+       pustule sizes of 5–40 px in typical 500–1000 px wide leaf images.
 
-      2. Computes a per-pixel "warmth score":
-            score = (a* - μa) / max(σa, 1.0)
-                  + (b* - μb) / max(σb, 1.0)
-         This measures how many combined standard deviations warmer/more
-         yellow-red the pixel is relative to healthy tissue.
+    2. Compute local warmth deviation:
+           warmth = (a* − local_a*) + 0.6 × (b* − local_b*)
+       a* deviation (red-green axis) is weighted more because rust is
+       distinctly red-orange, while b* (yellow-blue) provides secondary
+       confirmation.  Both are in OpenCV LAB units (0-255, neutral=128).
 
-      3. Applies a box-filter neighbourhood average over the score map
-         (kernel 5×5) so isolated hot pixels (JPEG noise) are suppressed
-         while genuine tiny pustule clusters still pass.
+    3. A second, wider Gaussian (kernel × 2 + 1) averages the warmth map
+       over a neighbourhood — suppresses single-pixel JPEG noise while
+       preserving genuine tiny pustule clusters (even a 3-px pustule affects
+       a 3×3 neighbourhood average measurably).
 
-      4. Flags pixels where BOTH the raw score AND the neighbourhood score
-         exceed their respective thresholds.
+    4. Flag pixels where BOTH the raw warmth AND the neighbourhood average
+       exceed their respective thresholds.
 
-      5. Additional guards:
-           • Pixel must NOT be in the green hue band (H 30–88)
-           • Pixel value must be > 35 (not pure shadow / background)
-           • Result is AND-ed with leaf_mask
+    5. Guards: exclude green-hued pixels (H 28–90) and very dark pixels (V≤30).
+       Light 3×3 closing fills sub-pixel gaps inside pustules.
+       Safety cap: if result covers > 55 % of the leaf, detector drifted → discard.
 
-    Returns a binary uint8 mask (H, W).
+    Returns binary uint8 mask (H, W).
     """
     img_bgr = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2BGR)
-    hsv     = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2HSV)
     lab     = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2LAB).astype(np.float32)
-
-    h_ch = hsv[:, :, 0]
-    v_ch = hsv[:, :, 2]
-
-    # ── Step 1: build healthy-tissue colour model ─────────────────────────
-    # "Healthy green" = H in [30, 88], S ≥ 35, V ≥ 50, inside leaf
-    green_mask = cv2.inRange(hsv, np.array([30, 35, 50]), np.array([88, 255, 255]))
-    green_mask = cv2.bitwise_and(green_mask, leaf_mask)
+    hsv     = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2HSV)
+    h_ch    = hsv[:, :, 0]
+    v_ch    = hsv[:, :, 2]
 
     a_ch = lab[:, :, 1]
     b_ch = lab[:, :, 2]
 
-    healthy_a = a_ch[green_mask > 0]
-    healthy_b = b_ch[green_mask > 0]
+    # ── Local mean via Gaussian blur ──────────────────────────────────────
+    ksize    = local_kernel | 1          # ensure odd
+    a_local  = cv2.GaussianBlur(a_ch, (ksize, ksize), ksize / 3.0)
+    b_local  = cv2.GaussianBlur(b_ch, (ksize, ksize), ksize / 3.0)
 
-    if len(healthy_a) < 200:
-        # Not enough healthy tissue sampled — skip adaptive detector
-        return np.zeros(img_rgb.shape[:2], dtype=np.uint8)
+    # ── Local warmth deviation ────────────────────────────────────────────
+    warmth = (a_ch - a_local) + 0.6 * (b_ch - b_local)
 
-    mu_a, sigma_a = float(np.mean(healthy_a)), float(np.std(healthy_a))
-    mu_b, sigma_b = float(np.mean(healthy_b)), float(np.std(healthy_b))
+    # ── Neighbourhood average of warmth (noise suppression) ───────────────
+    neib_k     = (ksize * 2 + 1) | 1
+    warmth_u8  = np.clip(warmth * 5 + 128, 0, 255).astype(np.uint8)
+    neib_u8    = cv2.GaussianBlur(warmth_u8, (neib_k, neib_k), neib_k / 3.0)
+    neib_score = (neib_u8.astype(np.float32) - 128) / 5.0
 
-    # ── Step 2: per-pixel warmth score ───────────────────────────────────
-    score = (
-        (a_ch - mu_a) / max(sigma_a, 1.0) +
-        (b_ch - mu_b) / max(sigma_b, 1.0)
-    )
+    # ── Threshold ─────────────────────────────────────────────────────────
+    hot = ((warmth > warmth_threshold) & (neib_score > neib_threshold)
+           ).astype(np.uint8) * 255
 
-    # ── Step 3: neighbourhood average (suppress noise, keep clusters) ────
-    # cv2.blur is equivalent to a box filter — much faster than Python loops
-    score_u8         = np.clip(score * 10 + 128, 0, 255).astype(np.uint8)
-    neighbour_u8     = cv2.blur(score_u8, (5, 5))
-    neighbour_score  = (neighbour_u8.astype(np.float32) - 128) / 10.0
-
-    # ── Step 4: threshold both raw and neighbourhood score ────────────────
-    hot_raw  = score           > sigma_threshold
-    hot_neib = neighbour_score > min_neighbourhood_score
-    hot      = (hot_raw & hot_neib).astype(np.uint8) * 255
-
-    # ── Step 5: guards ────────────────────────────────────────────────────
-    not_green = cv2.bitwise_not(cv2.inRange(h_ch, np.array([30]), np.array([88])))
-    bright    = (v_ch > 35).astype(np.uint8) * 255
+    # ── Guards ────────────────────────────────────────────────────────────
+    not_green = cv2.bitwise_not(cv2.inRange(h_ch, np.array([28]), np.array([90])))
+    bright    = (v_ch > 30).astype(np.uint8) * 255
 
     result = cv2.bitwise_and(hot,    not_green)
     result = cv2.bitwise_and(result, bright)
     result = cv2.bitwise_and(result, leaf_mask)
 
-    # Light closing only — preserve tiny pustule groups
     kern   = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
     result = cv2.morphologyEx(result, cv2.MORPH_CLOSE, kern)
 
-    # Safety cap: if anomaly covers > 60 % of the leaf the model drifted
-    leaf_area = np.count_nonzero(leaf_mask)
-    if leaf_area > 0 and np.count_nonzero(result) / leaf_area > 0.60:
+    leaf_area = int(np.count_nonzero(leaf_mask))
+    if leaf_area > 0 and int(np.count_nonzero(result)) / leaf_area > 0.55:
+        return np.zeros(img_rgb.shape[:2], dtype=np.uint8)
+
+    return result
+
+
+def _detect_gls_local_contrast(
+    img_rgb: np.ndarray,
+    leaf_mask: np.ndarray,
+    local_kernel: int = 25,
+    deficit_threshold: float = 28.0,
+    neib_threshold: float = 12.0,
+) -> np.ndarray:
+    """
+    Detect Gray Leaf Spot lesions via local HSV saturation contrast.
+
+    GLS lesions are rectangular, tan/gray areas that are markedly LESS
+    saturated than the surrounding green tissue.  They do not have a
+    distinctive absolute colour (they're close to white/beige), but their
+    saturation DEFICIT relative to healthy tissue is very consistent.
+
+    Algorithm
+    ─────────
+    1. Compute local mean saturation via Gaussian blur (kernel 25 px — GLS
+       lesions are larger than rust pustules so we use a wider window).
+
+    2. Saturation deficit = local_mean_S − pixel_S.
+       Positive values = pixel is less saturated than its surroundings.
+
+    3. Neighbourhood average of the deficit map (kernel 13 px) for noise
+       suppression.
+
+    4. Flag pixels where both raw deficit AND neighbourhood average exceed
+       thresholds.
+
+    5. Hue guard: pixel must not be green-hued (H 28–88) and must be in the
+       tan/straw/neutral range (H 0–35 OR very low S < 18).
+       Brightness guard: V > 70 (not shadow).
+       Safety cap: > 65 % leaf coverage → discard (over-detection).
+
+    Returns binary uint8 mask (H, W).
+    """
+    img_bgr = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2BGR)
+    hsv     = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2HSV).astype(np.float32)
+    h_ch    = hsv[:, :, 0].astype(np.uint8)
+    s_ch    = hsv[:, :, 1]
+    v_ch    = hsv[:, :, 2].astype(np.uint8)
+
+    # ── Local mean saturation ─────────────────────────────────────────────
+    ksize   = local_kernel | 1
+    s_local = cv2.GaussianBlur(s_ch, (ksize, ksize), ksize / 3.0)
+
+    # ── Saturation deficit ────────────────────────────────────────────────
+    deficit = s_local - s_ch   # positive = less saturated than neighbourhood
+
+    # ── Neighbourhood average (noise suppression) ─────────────────────────
+    neib_k     = 13
+    deficit_u8 = np.clip(deficit * 2 + 128, 0, 255).astype(np.uint8)
+    neib_u8    = cv2.GaussianBlur(deficit_u8, (neib_k, neib_k), neib_k / 3.0)
+    neib_score = (neib_u8.astype(np.float32) - 128) / 2.0
+
+    # ── Threshold ─────────────────────────────────────────────────────────
+    desaturated = ((deficit > deficit_threshold) & (neib_score > neib_threshold)
+                   ).astype(np.uint8) * 255
+
+    # ── Hue guard: tan/straw range only ───────────────────────────────────
+    # Allow H 0–35 (tan/warm neutral), or near-zero saturation (any hue)
+    tan_hue   = cv2.inRange(h_ch, np.array([0]),  np.array([35]))
+    very_pale = (hsv[:, :, 1] < 18).astype(np.uint8) * 255
+    hue_ok    = cv2.bitwise_or(tan_hue, very_pale)
+
+    not_green = cv2.bitwise_not(cv2.inRange(h_ch, np.array([28]), np.array([88])))
+    bright    = (v_ch > 70).astype(np.uint8) * 255
+
+    result = cv2.bitwise_and(desaturated, hue_ok)
+    result = cv2.bitwise_and(result,      not_green)
+    result = cv2.bitwise_and(result,      bright)
+    result = cv2.bitwise_and(result,      leaf_mask)
+
+    # Morphological cleanup — GLS lesions are elongated; close fills gaps
+    kern_c = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
+    kern_o = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+    result = cv2.morphologyEx(result, cv2.MORPH_CLOSE, kern_c)
+    result = cv2.morphologyEx(result, cv2.MORPH_OPEN,  kern_o)
+
+    leaf_area = int(np.count_nonzero(leaf_mask))
+    if leaf_area > 0 and int(np.count_nonzero(result)) / leaf_area > 0.65:
         return np.zeros(img_rgb.shape[:2], dtype=np.uint8)
 
     return result
@@ -285,9 +353,10 @@ def create_color_mask_within_leaf(
     disease_class: str = "Common_Rust",
 ) -> np.ndarray:
     """
-    Disease-aware colour thresholding in HSV + CIELAB.
-    For Common Rust an additional adaptive warm-colour anomaly detector runs
-    on top of the fixed ranges to catch pustules the fixed windows miss.
+    Two-stage colour mask:
+      Stage 1 — Fixed HSV + LAB ranges  (fast, handles clear-cut cases)
+      Stage 2 — Adaptive local-contrast  (handles lighting variation + edge cases)
+    Results are OR-ed, then green pixels removed, then morphological cleanup.
     """
     img_bgr  = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2BGR)
     hsv      = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2HSV)
@@ -297,13 +366,13 @@ def create_color_mask_within_leaf(
     profile  = DISEASE_COLOR_PROFILES.get(disease_class, DISEASE_COLOR_PROFILES["Common_Rust"])
     combined = np.zeros(img_rgb.shape[:2], dtype=np.uint8)
 
-    # ── Fixed HSV + LAB ranges ────────────────────────────────────────────
+    # ── Stage 1: fixed HSV + LAB ranges ──────────────────────────────────
     for lo, hi in profile["hsv_ranges"]:
         combined |= cv2.inRange(hsv, lo, hi)
     for lo, hi in profile["lab_ranges"]:
         combined |= cv2.inRange(lab, lo, hi)
 
-    # ── Blight adaptive desaturation detector ────────────────────────────
+    # ── Blight: adaptive desaturation detector ────────────────────────────
     if profile.get("use_green_departure", False):
         green_zone = cv2.inRange(hsv, np.array([35, 45, 40]), np.array([85, 255, 255]))
         green_zone = cv2.bitwise_and(green_zone, leaf_mask)
@@ -322,10 +391,12 @@ def create_color_mask_within_leaf(
             if leaf_area > 0 and np.count_nonzero(dep) / leaf_area < 0.50:
                 combined = cv2.bitwise_or(combined, dep)
 
-    # ── Common Rust adaptive warm-colour anomaly detector ─────────────────
-    if profile.get("use_rust_anomaly", False):
-        anomaly = _detect_rust_warm_anomaly(img_rgb, leaf_mask)
-        combined = cv2.bitwise_or(combined, anomaly)
+    # ── Stage 2: adaptive local-contrast detectors ────────────────────────
+    if profile.get("use_rust_local", False):
+        combined |= _detect_rust_local_contrast(img_rgb, leaf_mask)
+
+    if profile.get("use_gls_local", False):
+        combined |= _detect_gls_local_contrast(img_rgb, leaf_mask)
 
     # ── Remove green pixels ───────────────────────────────────────────────
     s_min      = profile.get("exclude_green_s_min", 40)
@@ -333,13 +404,11 @@ def create_color_mask_within_leaf(
     combined   = cv2.bitwise_and(combined, cv2.bitwise_not(green_mask))
     combined   = cv2.bitwise_and(combined, leaf_mask)
 
-    # ── Morphological cleanup (disease-specific kernel sizes) ─────────────
-    close_k = profile.get("morph_close_k", 5)
-    open_k  = profile.get("morph_open_k",  3)
-
-    kern_c = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (close_k, close_k))
+    # ── Morphological cleanup ─────────────────────────────────────────────
+    close_k  = profile.get("morph_close_k", 5)
+    open_k   = profile.get("morph_open_k",  3)
+    kern_c   = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (close_k, close_k))
     combined = cv2.morphologyEx(combined, cv2.MORPH_CLOSE, kern_c)
-
     if open_k > 0:
         kern_o   = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (open_k, open_k))
         combined = cv2.morphologyEx(combined, cv2.MORPH_OPEN, kern_o)
