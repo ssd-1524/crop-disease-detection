@@ -7,7 +7,7 @@ image = (
     .pip_install(
         "fastapi", "uvicorn", "torch", "torchvision",
         "opencv-python-headless", "Pillow", "scipy",
-        "sam2"
+        "sam2", "python-multipart"
     )
     .add_local_file("main.py",                      "/root/main.py")
     .add_local_file("CustomMobileNetV2_2_best.pth", "/root/CustomMobileNetV2_2_best.pth")
