@@ -9,6 +9,7 @@ image = (
         "opencv-python-headless", "Pillow", "scipy",
         "sam2"
     )
+    .add_local_file("main.py",                      "/root/main.py")
     .add_local_file("CustomMobileNetV2_2_best.pth", "/root/CustomMobileNetV2_2_best.pth")
     .add_local_file("sam2.1_hiera_large.pt",        "/root/sam2.1_hiera_large.pt")
 )
