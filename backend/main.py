@@ -59,7 +59,7 @@ class CustomMobileNetV2_3(nn.Module):
 # ── 3. Load Models ─────────────────────────────────────────────────────────────
 CLASSIFIER_FILENAME = "CustomMobileNetV2_2_best.pth"
 SAM2_CHECKPOINT     = "sam2.1_hiera_large.pt"
-SAM2_CONFIG = os.path.join(os.path.dirname(sam2.__file__), "configs/sam2.1/sam2.1_hiera_l.yaml")
+SAM2_CONFIG = "configs/sam2.1/sam2.1_hiera_l.yaml"
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
