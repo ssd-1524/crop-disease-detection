@@ -14,7 +14,8 @@ from sam2.sam2_image_predictor import SAM2ImagePredictor
 from sam2.automatic_mask_generator import SAM2AutomaticMaskGenerator
 from PIL import Image, ImageDraw, ImageFont
 import uvicorn
-from scipy import ndimage as scipy_ndimage   # for distribution analysis
+from scipy import ndimage as scipy_ndimage 
+import sam2
 
 # ── 1. App Setup ───────────────────────────────────────────────────────────────
 app = FastAPI()
@@ -32,7 +33,7 @@ app.add_middleware(
 
 # ── 2. Model Definitions ───────────────────────────────────────────────────────
 CLASS_NAMES = ["Blight", "Common_Rust", "Gray_Leaf_Spot", "Healthy"]
-SAM2_CONFIG = "configs/sam2.1/sam2.1_hiera_l.yaml"  # relative to sam2 package
+
 
 class CustomMobileNetV2_3(nn.Module):
     def __init__(self, num_classes=4, dropout_rate=0.2):
@@ -58,7 +59,7 @@ class CustomMobileNetV2_3(nn.Module):
 # ── 3. Load Models ─────────────────────────────────────────────────────────────
 CLASSIFIER_FILENAME = "CustomMobileNetV2_2_best.pth"
 SAM2_CHECKPOINT     = "sam2.1_hiera_large.pt"
-SAM2_CONFIG         = "configs/sam2.1/sam2.1_hiera_l.yaml"
+SAM2_CONFIG = os.path.join(os.path.dirname(sam2.__file__), "configs/sam2.1/sam2.1_hiera_l.yaml")
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
