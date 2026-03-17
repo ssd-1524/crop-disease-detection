@@ -11,7 +11,6 @@ image = (
     )
     .add_local_file("CustomMobileNetV2_2_best.pth", "/root/CustomMobileNetV2_2_best.pth")
     .add_local_file("sam2.1_hiera_large.pt",        "/root/sam2.1_hiera_large.pt")
-    .add_local_dir("configs",                        "/root/configs")
 )
 
 @app.function(
@@ -26,5 +25,5 @@ def fastapi_app():
     import sys, os
     os.chdir("/root")
     sys.path.insert(0, "/root")
-    from main import app   # import happens INSIDE here, not at top level
+    from main import app
     return app
