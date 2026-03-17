@@ -32,7 +32,7 @@ app.add_middleware(
 
 # ── 2. Model Definitions ───────────────────────────────────────────────────────
 CLASS_NAMES = ["Blight", "Common_Rust", "Gray_Leaf_Spot", "Healthy"]
-
+SAM2_CONFIG = "configs/sam2.1/sam2.1_hiera_l.yaml"  # relative to sam2 package
 
 class CustomMobileNetV2_3(nn.Module):
     def __init__(self, num_classes=4, dropout_rate=0.2):
