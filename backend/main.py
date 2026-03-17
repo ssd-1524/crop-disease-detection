@@ -180,41 +180,30 @@ DISEASE_COLOR_PROFILES = {
 def _detect_rust_local_contrast(
     img_rgb: np.ndarray,
     leaf_mask: np.ndarray,
-    local_kernel: int = 13,
-    warmth_threshold: float = 7.0,
-    neib_threshold: float = 3.5,
 ) -> np.ndarray:
     """
-    Detect Common Rust pustules via local LAB colour contrast.
+    Dual-scale local LAB contrast detector for Common Rust pustules.
 
-    A rust pustule is always anomalously warm (orange-red) relative to the
-    surrounding green tissue, regardless of absolute lighting.
+    Single-scale detectors fail on very small pustules (2–8 px) because the
+    neighbourhood average smooths out their signal before thresholding.
+    Running two scales and OR-ing the results catches both micro-pustules
+    (tight 7 px kernel) and larger mature pustules (wider 15 px kernel).
 
-    Algorithm
-    ─────────
-    1. Compute local mean LAB colour using a Gaussian blur (sigma ≈ kernel/3).
-       The kernel size sets the spatial scale of "local" — 13 px works well for
-       pustule sizes of 5–40 px in typical 500–1000 px wide leaf images.
+    Warmth = (a* − local_a*) + 0.6 × (b* − local_b*)
+      a* axis: red vs green  (primary rust signal)
+      b* axis: yellow vs blue (secondary confirmation)
 
-    2. Compute local warmth deviation:
-           warmth = (a* − local_a*) + 0.6 × (b* − local_b*)
-       a* deviation (red-green axis) is weighted more because rust is
-       distinctly red-orange, while b* (yellow-blue) provides secondary
-       confirmation.  Both are in OpenCV LAB units (0-255, neutral=128).
+    For each scale we threshold the RAW warmth map directly — no secondary
+    neighbourhood average — because the Gaussian blur already provides spatial
+    smoothing.  The neighbourhood check was the main reason tiny pustules were
+    getting suppressed.
 
-    3. A second, wider Gaussian (kernel × 2 + 1) averages the warmth map
-       over a neighbourhood — suppresses single-pixel JPEG noise while
-       preserving genuine tiny pustule clusters (even a 3-px pustule affects
-       a 3×3 neighbourhood average measurably).
-
-    4. Flag pixels where BOTH the raw warmth AND the neighbourhood average
-       exceed their respective thresholds.
-
-    5. Guards: exclude green-hued pixels (H 28–90) and very dark pixels (V≤30).
-       Light 3×3 closing fills sub-pixel gaps inside pustules.
-       Safety cap: if result covers > 55 % of the leaf, detector drifted → discard.
-
-    Returns binary uint8 mask (H, W).
+    Guards applied after OR:
+      • Not green-hued (H 28–90)
+      • Brightness V > 25  (exclude pure shadow/background)
+      • AND with leaf_mask
+      • 3×3 closing to fill sub-pixel gaps
+      • Safety cap > 55 % leaf coverage → discard
     """
     img_bgr = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2BGR)
     lab     = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2LAB).astype(np.float32)
@@ -225,31 +214,22 @@ def _detect_rust_local_contrast(
     a_ch = lab[:, :, 1]
     b_ch = lab[:, :, 2]
 
-    # ── Local mean via Gaussian blur ──────────────────────────────────────
-    ksize    = local_kernel | 1          # ensure odd
-    a_local  = cv2.GaussianBlur(a_ch, (ksize, ksize), ksize / 3.0)
-    b_local  = cv2.GaussianBlur(b_ch, (ksize, ksize), ksize / 3.0)
+    combined = np.zeros(img_rgb.shape[:2], dtype=np.uint8)
 
-    # ── Local warmth deviation ────────────────────────────────────────────
-    warmth = (a_ch - a_local) + 0.6 * (b_ch - b_local)
-
-    # ── Neighbourhood average of warmth (noise suppression) ───────────────
-    neib_k     = (ksize * 2 + 1) | 1
-    warmth_u8  = np.clip(warmth * 5 + 128, 0, 255).astype(np.uint8)
-    neib_u8    = cv2.GaussianBlur(warmth_u8, (neib_k, neib_k), neib_k / 3.0)
-    neib_score = (neib_u8.astype(np.float32) - 128) / 5.0
-
-    # ── Threshold ─────────────────────────────────────────────────────────
-    hot = ((warmth > warmth_threshold) & (neib_score > neib_threshold)
-           ).astype(np.uint8) * 255
+    for ksize, threshold in [(7, 5.0), (15, 6.5), (25, 8.0)]:
+        ksize   = ksize | 1
+        a_local = cv2.GaussianBlur(a_ch, (ksize, ksize), ksize / 3.0)
+        b_local = cv2.GaussianBlur(b_ch, (ksize, ksize), ksize / 3.0)
+        warmth  = (a_ch - a_local) + 0.6 * (b_ch - b_local)
+        hot     = (warmth > threshold).astype(np.uint8) * 255
+        combined = cv2.bitwise_or(combined, hot)
 
     # ── Guards ────────────────────────────────────────────────────────────
     not_green = cv2.bitwise_not(cv2.inRange(h_ch, np.array([28]), np.array([90])))
-    bright    = (v_ch > 30).astype(np.uint8) * 255
-
-    result = cv2.bitwise_and(hot,    not_green)
-    result = cv2.bitwise_and(result, bright)
-    result = cv2.bitwise_and(result, leaf_mask)
+    bright    = (v_ch > 25).astype(np.uint8) * 255
+    result    = cv2.bitwise_and(combined,  not_green)
+    result    = cv2.bitwise_and(result,    bright)
+    result    = cv2.bitwise_and(result,    leaf_mask)
 
     kern   = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
     result = cv2.morphologyEx(result, cv2.MORPH_CLOSE, kern)
@@ -514,7 +494,11 @@ def _cluster_bbox(cluster, stats, img_w, img_h, pad=24):
 # Rust pustules are inherently small — a 50 px pustule is a legitimate "spot",
 # not a region, so we use a lower threshold to avoid sending tiny areas through
 # SAM2 where it tends to over-expand.
-_SPOT_THRESHOLDS = {
+_MIN_AREAS = {
+    "Common_Rust":    3,   # pustules can be 3-5 px on high-res images
+    "Blight":         8,
+    "Gray_Leaf_Spot": 6,
+}
     "Common_Rust":   60,   # pustules are small; keep more as verbatim spots
     "Blight":       200,   # blight lesions are large
     "Gray_Leaf_Spot": 120,
@@ -531,7 +515,6 @@ def refine_disease_mask_with_sam2(
     rough_mask: np.ndarray,
     leaf_mask: np.ndarray,
     disease_class: str = "Common_Rust",
-    min_area: int = 6,
 ) -> tuple[np.ndarray, np.ndarray]:
     """
     3-pass mask-guided SAM2 refinement with disease-specific thresholds.
@@ -551,6 +534,7 @@ def refine_disease_mask_with_sam2(
     over-expands on sub-pixel-cluster pustules).
     """
     h, w = img_rgb.shape[:2]
+    min_area       = _MIN_AREAS.get(disease_class, 6)
     spot_threshold = _SPOT_THRESHOLDS.get(disease_class, 120)
     cluster_gap    = _CLUSTER_GAPS.get(disease_class, 40)
 
