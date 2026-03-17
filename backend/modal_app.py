@@ -9,9 +9,9 @@ image = (
         "opencv-python-headless", "Pillow", "scipy",
         "sam2"
     )
-    .copy_local_file("CustomMobileNetV2_2_best.pth", "/root/CustomMobileNetV2_2_best.pth")
-    .copy_local_file("sam2.1_hiera_large.pt",        "/root/sam2.1_hiera_large.pt")
-    .copy_local_dir("configs",                        "/root/configs")
+    .add_local_file("CustomMobileNetV2_2_best.pth", "/root/CustomMobileNetV2_2_best.pth")
+    .add_local_file("sam2.1_hiera_large.pt",        "/root/sam2.1_hiera_large.pt")
+    .add_local_dir("configs",                        "/root/configs")
 )
 
 @app.function(
