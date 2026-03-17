@@ -22,7 +22,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "http://localhost:3000",
-        "https://vercel.com/ssd-1524s-projects/crop-disease-detection/4BxA9fp7EJextC2XNnbSo7rhueJe",
+        "https://crop-disease-detection-git-master-ssd-1524s-projects.vercel.app",
     ],
     allow_credentials=True,
     allow_methods=["*"],
