@@ -11,7 +11,6 @@ backend/__pycache__/
 .env
 *.pt
 *.pth
-backend/sam2.1_hiera_large.pt
 backend/sam_vit_b_01ec64.pth
 backend/mobilenet_classification_model.h5
 backend/.cache
