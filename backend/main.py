@@ -72,18 +72,6 @@ print("Classifier loaded successfully.")
 sam2_model    = build_sam2(SAM2_CONFIG, SAM2_CHECKPOINT, device=device)
 sam_predictor = SAM2ImagePredictor(sam2_model)
 
-sam_auto_generator = SAM2AutomaticMaskGenerator(
-    model=sam2_model,
-    points_per_side=48,
-    points_per_batch=64,
-    pred_iou_thresh=0.7,
-    stability_score_thresh=0.90,
-    min_mask_region_area=25,
-    crop_n_layers=1,
-    crop_n_points_downscale_factor=2,
-    use_m2m=True,
-    output_mode="binary_mask",
-)
 print("SAM2 loaded successfully.")
 
 preprocess = transforms.Compose([

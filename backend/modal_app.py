@@ -15,10 +15,10 @@ image = (
 
 @app.function(
     image=image,
-    gpu="T4",
-    memory=8192,
-    timeout=120,
-    container_idle_timeout=300,
+    gpu="A10G",
+    memory=16384,
+    timeout=300,
+    scaledown_window=300,
 )
 @modal.asgi_app()
 def fastapi_app():
