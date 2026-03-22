@@ -1,411 +1,412 @@
 "use client";
 
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useMemo, useRef } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Progress } from "@/components/ui/progress";
 import { toast } from "sonner";
 import {
-  UploadCloud,
-  X,
-  CheckCircle,
-  AlertTriangle,
-  BrainCircuit,
-  Leaf,
-  FlaskConical,
-  Circle,
-  Layers,
+  UploadCloud, X, CheckCircle, AlertTriangle,
+  BrainCircuit, Leaf, FlaskConical, Loader2, Microscope,
 } from "lucide-react";
 
-// ── Spinner ────────────────────────────────────────────────────────────────────
-const Spinner = ({ size = 20 }) => (
-  <svg
-    xmlns="http://www.w3.org/2000/svg"
-    width={size}
-    height={size}
-    viewBox="0 0 24 24"      // ← fixed: was "0 0 24" (missing height)
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="2"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-    className="animate-spin"
-  >
-    <path d="M21 12a9 9 0 1 1-6.219-8.56" />
-  </svg>
-);
-
-// ── Severity colour helper ─────────────────────────────────────────────────────
-const getSeverityColor = (label) => {
-  switch (label) {
-    case "Mild": return "text-yellow-500";
-    case "Moderate": return "text-orange-500";
-    case "Severe": return "text-red-600";
-    default: return "text-gray-500";
-  }
+// ── Design tokens ──────────────────────────────────────────────────────────────
+const T = {
+  font: "'Outfit', system-ui, sans-serif",
+  bg: "#09090b",
+  card: "#18181b",
+  cardAlt: "#111113",
+  b1: "#27272a",   // subtle border
+  b2: "#3f3f46",   // mid border
+  t1: "#f4f4f5",   // text primary
+  t2: "#a1a1aa",   // text secondary
+  t3: "#71717a",   // text muted
+  t4: "#52525b",   // text dim
+  em: "#10b981",   // emerald
+  emL: "#34d399",   // emerald light
+  emBg: "#052014",
+  emBd: "#14532d",
+  am: "#f59e0b",   // amber
+  amBg: "#1c1107",
+  amBd: "#78350f",
+  or: "#f97316",   // orange
+  orBg: "#1a0a02",
+  orBd: "#7c2d12",
+  rd: "#ef4444",   // red
+  rdBg: "#1c0606",
+  rdBd: "#7f1d1d",
 };
 
-const getSeverityBarColor = (pct) => {
-  if (pct < 5) return "bg-yellow-400";
-  if (pct < 15) return "bg-orange-500";
-  return "bg-red-600";
+const SEV_MAP = {
+  Mild: { bar: T.am, txt: T.am, bg: T.amBg, bd: T.amBd },
+  Moderate: { bar: T.or, txt: T.or, bg: T.orBg, bd: T.orBd },
+  Severe: { bar: T.rd, txt: T.rd, bg: T.rdBg, bd: T.rdBd },
+  _: { bar: T.b2, txt: T.t3, bg: T.cardAlt, bd: T.b1 },
+};
+const getSev = (l) => SEV_MAP[l] ?? SEV_MAP._;
+
+// ── Shared card shell ──────────────────────────────────────────────────────────
+const card = {
+  background: T.card,
+  border: `1px solid ${T.b1}`,
+  borderRadius: 16,
+  padding: 20,
+  boxShadow: "0 8px 32px rgba(0,0,0,0.4)",
+  fontFamily: T.font,
 };
 
-// ── Drag-and-drop zone ─────────────────────────────────────────────────────────
-const DropZone = ({ preview, onFile, onClear }) => {
-  const [isDragging, setIsDragging] = useState(false);
+// ── Section header row ─────────────────────────────────────────────────────────
+function SectionHead({ IconComp, iconColor, iconBg, iconBd, title, sub }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
+      <div style={{
+        width: 32, height: 32, borderRadius: 10, flexShrink: 0,
+        background: iconBg, border: `1px solid ${iconBd}`,
+        display: "flex", alignItems: "center", justifyContent: "center",
+      }}>
+        <IconComp size={15} color={iconColor} strokeWidth={1.5} />
+      </div>
+      <div>
+        <p style={{ margin: 0, fontSize: 14, fontWeight: 600, color: T.t1 }}>{title}</p>
+        <p style={{ margin: 0, fontSize: 11, fontWeight: 300, color: T.t3 }}>{sub}</p>
+      </div>
+    </div>
+  );
+}
+
+// ── Loading steps ─────────────────────────────────────────────────────────────
+const STEPS = [
+  { label: "Classifying disease", sub: "Running CNN inference", icon: FlaskConical },
+  { label: "Segmenting leaf", sub: "SAM2 segmentation model", icon: Leaf },
+  { label: "Measuring severity", sub: "Pixel-level analysis", icon: Microscope },
+];
+
+function LoadingSteps({ current }) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 6, padding: "4px 0" }}>
+      {STEPS.map((step, i) => {
+        const Icon = step.icon;
+        const done = i < current, active = i === current, future = i > current;
+        return (
+          <div key={step.label} style={{
+            display: "flex", alignItems: "center", gap: 12,
+            padding: "10px 12px", borderRadius: 12,
+            background: active ? T.emBg : "transparent",
+            border: `1px solid ${active ? T.emBd : "transparent"}`,
+            opacity: future ? 0.25 : 1,
+          }}>
+            <div style={{
+              width: 32, height: 32, borderRadius: 10, flexShrink: 0,
+              display: "flex", alignItems: "center", justifyContent: "center",
+              background: done ? T.emBg : active ? T.em : T.cardAlt,
+              border: `1px solid ${done ? T.emBd : active ? T.em : T.b1}`,
+              boxShadow: active ? "0 0 12px rgba(16,185,129,0.4)" : "none",
+            }}>
+              {active
+                ? <Loader2 size={14} color="#fff" style={{ animation: "mh-spin 0.8s linear infinite" }} />
+                : done
+                  ? <CheckCircle size={14} color={T.emL} strokeWidth={1.5} />
+                  : <Icon size={14} color={T.t4} strokeWidth={1.5} />}
+            </div>
+            <div>
+              <p style={{
+                margin: 0, fontSize: 13,
+                fontWeight: active ? 500 : 400,
+                color: done ? T.t4 : active ? T.t1 : T.t4,
+                textDecoration: done ? "line-through" : "none",
+              }}>
+                {step.label}
+              </p>
+              {active && (
+                <p style={{ margin: 0, fontSize: 11, color: T.emL, fontWeight: 300, marginTop: 2 }}>
+                  {step.sub}
+                </p>
+              )}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ── Drop zone ─────────────────────────────────────────────────────────────────
+function DropZone({ preview, onFile, onClear, inputRef }) {
+  const [drag, setDrag] = useState(false);
 
   const handleDrop = useCallback((e) => {
-    e.preventDefault();
-    setIsDragging(false);
-    const dropped = e.dataTransfer.files[0];
-    if (dropped && (dropped.type === "image/jpeg" || dropped.type === "image/png")) {
-      onFile(dropped);
-    } else {
-      toast.error("Please upload a JPEG or PNG image.");
-    }
+    e.preventDefault(); setDrag(false);
+    const f = e.dataTransfer.files[0];
+    if (f && (f.type === "image/jpeg" || f.type === "image/png")) onFile(f);
+    else toast.error("JPEG or PNG only.");
   }, [onFile]);
+
+  const baseStyle = {
+    position: "relative", display: "flex", alignItems: "center", justifyContent: "center",
+    height: 240, borderRadius: 16, cursor: preview ? "default" : "pointer",
+    border: `2px dashed ${drag ? T.em : T.b2}`,
+    background: drag ? T.emBg : T.cardAlt,
+    boxShadow: drag ? "0 0 28px rgba(16,185,129,0.12)" : "none",
+    transition: "border-color 0.2s, background 0.2s, box-shadow 0.2s",
+    overflow: "hidden",
+  };
+  if (preview) { baseStyle.border = `1px solid ${T.b1}`; baseStyle.cursor = "default"; }
 
   return (
     <div
-      onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
-      onDragLeave={() => setIsDragging(false)}
+      style={baseStyle}
+      onDragOver={(e) => { e.preventDefault(); setDrag(true); }}
+      onDragLeave={() => setDrag(false)}
       onDrop={handleDrop}
-      className={`relative h-64 border-2 border-dashed rounded-xl flex items-center
-        justify-center text-center transition-colors duration-200
-        ${isDragging
-          ? "border-green-500 bg-green-50"
-          : preview
-            ? "border-transparent bg-gray-100"
-            : "border-gray-300 bg-gray-50/50 hover:border-gray-400"
-        }`}
+      onClick={() => !preview && inputRef.current?.click()}
     >
       {preview ? (
         <>
-          <img
-            src={preview}
-            alt="Leaf preview"
-            className="max-h-60 object-contain rounded-lg"
-          />
+          <img src={preview} alt="Preview" style={{ maxHeight: 220, borderRadius: 12, objectFit: "contain" }} />
           <button
-            onClick={onClear}
-            aria-label="Remove image"
-            className="absolute top-2 right-2 bg-red-500 hover:bg-red-600 text-white
-              rounded-full p-1 shadow transition-colors"
+            type="button"
+            onClick={(e) => { e.stopPropagation(); onClear(); }}
+            style={{
+              position: "absolute", top: 12, right: 12,
+              width: 28, height: 28, borderRadius: 8, border: `1px solid ${T.b2}`,
+              background: T.card, cursor: "pointer", color: T.t3,
+              display: "flex", alignItems: "center", justifyContent: "center",
+            }}
+            onMouseEnter={e => { e.currentTarget.style.background = T.rdBg; e.currentTarget.style.color = T.rd; e.currentTarget.style.borderColor = T.rdBd; }}
+            onMouseLeave={e => { e.currentTarget.style.background = T.card; e.currentTarget.style.color = T.t3; e.currentTarget.style.borderColor = T.b2; }}
           >
-            <X className="w-4 h-4" />
+            <X size={14} />
           </button>
         </>
       ) : (
-        <div className="text-gray-400 space-y-2 pointer-events-none">
-          <UploadCloud className="w-10 h-10 mx-auto text-gray-300" />
-          <p className="text-sm font-medium">Drag & drop or click to upload</p>
-          <p className="text-xs">JPEG / PNG supported</p>
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 16, padding: "0 24px", pointerEvents: "none", textAlign: "center" }}>
+          <div style={{
+            width: 56, height: 56, borderRadius: 16, flexShrink: 0,
+            display: "flex", alignItems: "center", justifyContent: "center",
+            background: drag ? T.emBg : T.card,
+            border: `2px dashed ${drag ? T.em : T.b2}`,
+          }}>
+            <UploadCloud size={24} color={drag ? T.emL : T.t4} strokeWidth={1.5} />
+          </div>
+          <div>
+            <p style={{ margin: 0, fontSize: 14, fontWeight: 500, color: T.t2 }}>
+              Drop image here or{" "}
+              <span style={{ color: T.emL }}>browse files</span>
+            </p>
+            <p style={{ margin: "4px 0 0", fontSize: 12, color: T.t4, fontWeight: 300 }}>
+              JPEG · PNG supported
+            </p>
+          </div>
         </div>
       )}
     </div>
   );
-};
+}
 
-// ── Analysing steps indicator ──────────────────────────────────────────────────
-const steps = [
-  { label: "Classifying disease", icon: FlaskConical },
-  { label: "Segmenting leaf (SAM2)", icon: Leaf },
-  { label: "Measuring severity", icon: BrainCircuit },
-];
-
-const LoadingSteps = ({ currentStep }) => (
-  <div className="space-y-3 py-4">
-    {steps.map((step, i) => {
-      const Icon = step.icon;
-      const done = i < currentStep;
-      const active = i === currentStep;
-      return (
-        <div
-          key={step.label}
-          className={`flex items-center gap-3 text-sm transition-opacity duration-300
-            ${i > currentStep ? "opacity-30" : "opacity-100"}`}
-        >
-          <div className={`w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0
-            ${done ? "bg-green-100 text-green-600"
-              : active ? "bg-blue-100 text-blue-600"
-                : "bg-gray-100 text-gray-400"}`}
-          >
-            {active ? <Spinner size={14} /> : <Icon className="w-4 h-4" />}
-          </div>
-          <span className={done ? "line-through text-gray-400" : active ? "font-medium" : ""}>
-            {step.label}
-          </span>
-          {done && <CheckCircle className="w-4 h-4 text-green-500 ml-auto" />}
-        </div>
-      );
-    })}
-  </div>
-);
-
-// ── Main component ─────────────────────────────────────────────────────────────
+// ── Main ───────────────────────────────────────────────────────────────────────
 export default function ImageUploader() {
   const [file, setFile] = useState(null);
-  const [preview, setPreview] = useState(null);
-  const [result, setResult] = useState(null);
-  const [isLoading, setIsLoading] = useState(false);
-  const [loadingStep, setLoadingStep] = useState(0);
-  const [error, setError] = useState(null);
-
-  // Stable reference — prevents a new Supabase client instance on every render
+  const [prev, setPrev] = useState(null);
+  const [res, setRes] = useState(null);
+  const [load, setLoad] = useState(false);
+  const [step, setStep] = useState(0);
+  const [err, setErr] = useState(null);
+  const inputRef = useRef(null);
   const supabase = useMemo(() => createClient(), []);
 
-  const handleFile = useCallback((selected) => {
-    setFile(selected);
-    setPreview(URL.createObjectURL(selected));
-    setResult(null);
-    setError(null);
+  const handleFile = useCallback((f) => {
+    setFile(f); setPrev(URL.createObjectURL(f)); setRes(null); setErr(null);
   }, []);
 
-  const handleFileInput = (e) => {
-    const selected = e.target.files[0];
-    if (selected) handleFile(selected);
-  };
-
   const handleClear = () => {
-    setFile(null);
-    setPreview(null);
-    setResult(null);
-    setError(null);
-    const input = document.getElementById("leaf-image-input");
-    if (input) input.value = "";
+    setFile(null); setPrev(null); setRes(null); setErr(null);
+    if (inputRef.current) inputRef.current.value = "";
   };
 
   const handleAnalyze = async () => {
     if (!file) return;
-    setIsLoading(true);
-    setLoadingStep(0);
-    setError(null);
-    setResult(null);
-
+    setLoad(true); setStep(0); setErr(null); setRes(null);
     try {
-      // 1. Auth check
       const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error("You must be logged in to analyse images.");
-
-      // 2. Upload to Supabase Storage
-      const filePath = `${user.id}/${Date.now()}_${file.name}`;
-      const { error: uploadError } = await supabase.storage
-        .from("maize-images")
-        .upload(filePath, file);
-      if (uploadError) throw new Error(`Storage Error: ${uploadError.message}`);
-
-      // 3. Call FastAPI backend
-      setLoadingStep(1);
-      const formData = new FormData();
-      formData.append("file", file);
-
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL
-        ? `${process.env.NEXT_PUBLIC_API_URL}/predict`
-        : "http://127.0.0.1:8000/predict";
-
-      const response = await fetch(apiUrl, { method: "POST", body: formData });
-
-      if (!response.ok) {
-        const detail = await response.json().catch(() => ({}));
-        throw new Error(detail?.detail || `API error ${response.status}`);
-      }
-
-      setLoadingStep(2);
-      const analysisResult = await response.json();
-      if (analysisResult.error) throw new Error(analysisResult.error);
-
-      // 4. Save to database
-      const { error: insertError } = await supabase.from("analyses").insert({
-        image_path: filePath,
-        prediction: analysisResult.prediction,
-        confidence: analysisResult.confidence,
-        severity_percentage: analysisResult.severity_percentage,
-        severity_label: analysisResult.severity_label,
-        sam_mask_image: analysisResult.sam_mask_image ?? null,
-        spot_count: analysisResult.spot_count ?? 0,
-        region_count: analysisResult.region_count ?? 0,
-        spot_severity_pct: analysisResult.spot_severity_pct ?? 0,
-        region_severity_pct: analysisResult.region_severity_pct ?? 0,
+      if (!user) throw new Error("You must be logged in.");
+      const fp = `${user.id}/${Date.now()}_${file.name}`;
+      const { error: ue } = await supabase.storage.from("maize-images").upload(fp, file);
+      if (ue) throw new Error(`Upload failed: ${ue.message}`);
+      setStep(1);
+      const form = new FormData(); form.append("file", file);
+      const url = process.env.NEXT_PUBLIC_API_URL ? `${process.env.NEXT_PUBLIC_API_URL}/predict` : "http://127.0.0.1:8000/predict";
+      const r = await fetch(url, { method: "POST", body: form });
+      if (!r.ok) { const d = await r.json().catch(() => { }); throw new Error(d?.detail || `API error ${r.status}`); }
+      setStep(2);
+      const data = await r.json();
+      if (data.error) throw new Error(data.error);
+      await supabase.from("analyses").insert({
+        image_path: fp, prediction: data.prediction, confidence: data.confidence,
+        severity_percentage: data.severity_percentage, severity_label: data.severity_label,
+        sam_mask_image: data.sam_mask_image ?? null, spot_count: data.spot_count ?? 0,
+        region_count: data.region_count ?? 0, spot_severity_pct: data.spot_severity_pct ?? 0,
+        region_severity_pct: data.region_severity_pct ?? 0,
       });
-      if (insertError) throw new Error(`Database Error: ${insertError.message}`);
-
-      setResult(analysisResult);
-      toast.success("Analysis complete!");
-
-    } catch (err) {
-      console.error(err);
-      const msg = err.message || "An unknown error occurred.";
-      setError(msg);
-      toast.error(msg);
-    } finally {
-      setIsLoading(false);
-      setLoadingStep(0);
-    }
+      setRes(data); toast.success("Analysis complete.");
+    } catch (e) {
+      const msg = e.message || "Unknown error."; setErr(msg); toast.error(msg);
+    } finally { setLoad(false); setStep(0); }
   };
 
-  const isHealthy = result?.prediction === "Healthy";
-  const ResultIcon = isHealthy ? CheckCircle : AlertTriangle;
-  const resultColor = isHealthy ? "text-green-500" : "text-orange-500";
-  const severityColor = result ? getSeverityColor(result.severity_label) : "";
+  const isHealthy = res?.prediction === "Healthy";
+  const sev = res ? getSev(res.severity_label) : null;
 
   return (
-    <div className="w-full max-w-4xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-8">
+    <>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@200;300;400;500;600;700&display=swap');
+        @keyframes mh-spin { to { transform: rotate(360deg); } }
+        @keyframes mh-fade { from { opacity:0; transform: translateY(4px); } to { opacity:1; transform: translateY(0); } }
+      `}</style>
 
-      {/* ── Upload Card ───────────────────────────────────────────────────────── */}
-      <Card className="transition-all hover:shadow-lg hover:-translate-y-1">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <UploadCloud className="w-5 h-5" />
-            Upload Leaf Image
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <DropZone preview={preview} onFile={handleFile} onClear={handleClear} />
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, fontFamily: T.font }}>
 
-          <Input
-            id="leaf-image-input"
-            type="file"
-            accept="image/jpeg,image/png"
-            onChange={handleFileInput}
-            className="cursor-pointer"
-          />
+        {/* Upload card */}
+        <div style={card}>
+          <SectionHead IconComp={UploadCloud} iconColor={T.emL} iconBg={T.emBg} iconBd={T.emBd} title="Upload Image" sub="Maize leaf photo" />
 
-          <Button
+          <DropZone preview={prev} onFile={handleFile} onClear={handleClear} inputRef={inputRef} />
+
+          <input ref={inputRef} type="file" accept="image/jpeg,image/png"
+            onChange={e => { if (e.target.files[0]) handleFile(e.target.files[0]); }}
+            style={{ display: "none" }} />
+
+          <button
             onClick={handleAnalyze}
-            disabled={!file || isLoading}
-            className="w-full flex items-center justify-center gap-2"
+            disabled={!file || load}
+            style={{
+              marginTop: 14, width: "100%", height: 44, borderRadius: 12, border: "none",
+              background: !file || load ? "#10b98150" : T.em,
+              color: "#fff", fontSize: 14, fontWeight: 600, cursor: !file || load ? "not-allowed" : "pointer",
+              fontFamily: T.font, display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+              boxShadow: !file || load ? "none" : "0 0 24px rgba(16,185,129,0.3)",
+              transition: "all 0.2s",
+            }}
           >
-            {isLoading ? (
-              <><Spinner size={18} /> Analysing...</>
-            ) : (
-              "Analyse Image"
-            )}
-          </Button>
+            {load
+              ? <><Loader2 size={16} style={{ animation: "mh-spin 0.8s linear infinite" }} /> Analysing…</>
+              : "Analyse Image"
+            }
+          </button>
 
-          {error && (
-            <p className="text-red-500 text-sm text-center bg-red-50 rounded-lg p-3">
-              {error}
-            </p>
+          {err && (
+            <div style={{ marginTop: 12, display: "flex", alignItems: "flex-start", gap: 10, padding: "12px 14px", borderRadius: 12, background: T.rdBg, border: `1px solid ${T.rdBd}` }}>
+              <AlertTriangle size={15} color={T.rd} style={{ flexShrink: 0, marginTop: 1 }} strokeWidth={1.5} />
+              <p style={{ margin: 0, fontSize: 12, color: T.rd, fontWeight: 300, lineHeight: 1.5 }}>{err}</p>
+            </div>
           )}
-        </CardContent>
-      </Card>
+        </div>
 
-      {/* ── Results Card ──────────────────────────────────────────────────────── */}
-      <Card className="transition-all hover:shadow-lg hover:-translate-y-1">
-        <CardHeader>
-          <CardTitle>Analysis Result</CardTitle>
-        </CardHeader>
-        <CardContent>
+        {/* Result card */}
+        <div style={card}>
+          <SectionHead IconComp={BrainCircuit} iconColor={T.t3} iconBg={T.cardAlt} iconBd={T.b1} title="Analysis Result" sub="AI diagnostic output" />
 
-          {/* Loading state */}
-          {isLoading && <LoadingSteps currentStep={loadingStep} />}
+          {load && <LoadingSteps current={step} />}
 
-          {/* Results */}
-          {!isLoading && result && (
-            <div className="space-y-5">
+          {!load && res && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 14, animation: "mh-fade 0.25s ease-out" }}>
 
-              {/* Prediction + confidence */}
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <ResultIcon className={`w-10 h-10 flex-shrink-0 ${resultColor}`} />
-                  <div>
-                    <p className="text-xs text-gray-400 uppercase tracking-wide">
-                      Prediction
-                    </p>
-                    <p className="text-2xl font-bold leading-tight">
-                      {result.prediction.replace(/_/g, " ")}
-                    </p>
-                  </div>
+              {/* Prediction */}
+              <div style={{
+                display: "flex", alignItems: "center", gap: 14, padding: "14px 16px", borderRadius: 14,
+                background: isHealthy ? T.emBg : "#1a0c02",
+                border: `1px solid ${isHealthy ? T.emBd : "#7c3311"}`,
+              }}>
+                <div style={{
+                  width: 44, height: 44, borderRadius: 12, flexShrink: 0,
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  background: isHealthy ? "#0a3320" : "#2d1206",
+                  boxShadow: isHealthy ? "0 0 16px rgba(16,185,129,0.25)" : "none",
+                }}>
+                  {isHealthy
+                    ? <CheckCircle size={20} color={T.emL} strokeWidth={1.5} />
+                    : <AlertTriangle size={20} color="#fb923c" strokeWidth={1.5} />}
                 </div>
-                <div className="text-right">
-                  <p className="text-xs text-gray-400 uppercase tracking-wide">
-                    Confidence
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <p style={{ margin: 0, fontSize: 10, fontWeight: 600, letterSpacing: "0.15em", textTransform: "uppercase", color: T.t4 }}>Prediction</p>
+                  <p style={{ margin: "3px 0 0", fontSize: 20, fontWeight: 700, color: T.t1, lineHeight: 1.2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {res.prediction.replace(/_/g, " ")}
                   </p>
-                  <p className="text-xl font-semibold">{result.confidence}</p>
+                </div>
+                <div style={{ textAlign: "right", flexShrink: 0 }}>
+                  <p style={{ margin: 0, fontSize: 10, fontWeight: 600, letterSpacing: "0.15em", textTransform: "uppercase", color: T.t4 }}>Confidence</p>
+                  <p style={{ margin: "3px 0 0", fontSize: 16, fontWeight: 600, color: T.t2 }}>{res.confidence}</p>
                 </div>
               </div>
 
-              {/* Severity (non-healthy only) */}
-              {!isHealthy && (
-                <div className="space-y-2 bg-gray-50 rounded-xl p-4">
-                  <div className="flex justify-between items-center">
-                    <p className="text-xs text-gray-400 uppercase tracking-wide">
-                      Disease Severity
-                    </p>
-                    <span className={`text-sm font-semibold ${severityColor}`}>
-                      {result.severity_label}
+              {/* Severity */}
+              {!isHealthy && res.severity_percentage != null && (
+                <div style={{ padding: "14px 16px", borderRadius: 12, background: T.cardAlt, border: `1px solid ${T.b1}` }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+                    <p style={{ margin: 0, fontSize: 10, fontWeight: 600, letterSpacing: "0.15em", textTransform: "uppercase", color: T.t4 }}>Disease Severity</p>
+                    <span style={{ fontSize: 11, fontWeight: 600, padding: "3px 10px", borderRadius: 99, background: sev.bg, color: sev.txt, border: `1px solid ${sev.bd}` }}>
+                      {res.severity_label}
                     </span>
                   </div>
-                  {/* Custom coloured progress bar */}
-                  <div className="w-full bg-gray-200 rounded-full h-3 overflow-hidden">
-                    <div
-                      className={`h-3 rounded-full transition-all duration-700
-                        ${getSeverityBarColor(result.severity_percentage)}`}
-                      style={{ width: `${result.severity_percentage}%` }}
-                    />
+                  <div style={{ width: "100%", height: 6, background: T.b2, borderRadius: 99, overflow: "hidden" }}>
+                    <div style={{ height: "100%", borderRadius: 99, background: sev.bar, width: `${res.severity_percentage}%`, transition: "width 0.7s cubic-bezier(0.4,0,0.2,1)" }} />
                   </div>
-                  <p className="text-right text-lg font-bold">
-                    {result.severity_percentage}%
-                  </p>
-
-                  {/* Spot / Region breakdown */}
-                  {(result.spot_count > 0 || result.region_count > 0) && (
-                    <div className="grid grid-cols-2 gap-3 pt-2 border-t border-gray-200 mt-2">
-                      <div className="flex items-center gap-2">
-                        <div className="w-3 h-3 rounded-full bg-orange-400 flex-shrink-0" />
-                        <div>
-                          <p className="text-xs text-gray-400">Spots</p>
-                          <p className="text-sm font-semibold">
-                            {result.spot_count} ({result.spot_severity_pct}%)
-                          </p>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <div className="w-3 h-3 rounded-full bg-red-500 flex-shrink-0" />
-                        <div>
-                          <p className="text-xs text-gray-400">Regions</p>
-                          <p className="text-sm font-semibold">
-                            {result.region_count} ({result.region_severity_pct}%)
-                          </p>
-                        </div>
-                      </div>
+                  <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", marginTop: 8 }}>
+                    <p style={{ margin: 0, fontSize: 11, color: T.t4, fontWeight: 300 }}>Affected leaf area</p>
+                    <p style={{ margin: 0, fontSize: 28, fontWeight: 200, color: sev.txt, letterSpacing: "-0.02em", lineHeight: 1 }}>
+                      {res.severity_percentage}<span style={{ fontSize: 13, color: T.t4 }}>%</span>
+                    </p>
+                  </div>
+                  {(res.spot_count > 0 || res.region_count > 0) && (
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 12, paddingTop: 12, borderTop: `1px solid ${T.b1}` }}>
+                      {[{ l: "Spots", n: res.spot_count, p: res.spot_severity_pct, dot: "#fbbf24" }, { l: "Regions", n: res.region_count, p: res.region_severity_pct, dot: "#f87171" }]
+                        .map(({ l, n, p, dot }) => (
+                          <div key={l} style={{ background: T.card, borderRadius: 10, padding: "10px 12px" }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
+                              <div style={{ width: 8, height: 8, borderRadius: "50%", background: dot, flexShrink: 0 }} />
+                              <p style={{ margin: 0, fontSize: 10, fontWeight: 600, letterSpacing: "0.1em", textTransform: "uppercase", color: T.t4 }}>{l}</p>
+                            </div>
+                            <p style={{ margin: 0, fontSize: 18, fontWeight: 600, color: T.t2 }}>{n}</p>
+                            <p style={{ margin: "2px 0 0", fontSize: 11, color: T.t4 }}>{p}% coverage</p>
+                          </div>
+                        ))}
                     </div>
                   )}
                 </div>
               )}
 
-              {/* SAM2 overlay */}
-              {result.sam_mask_image && (
-                <div className="space-y-2">
-                  <p className="text-xs text-gray-400 uppercase tracking-wide flex items-center gap-1.5">
-                    <BrainCircuit className="w-4 h-4" />
-                    SAM2 Disease Overlay
-                  </p>
-                  <div className="rounded-xl overflow-hidden border border-gray-100 bg-gray-900">
-                    <img
-                      src={`data:image/jpeg;base64,${result.sam_mask_image}`}
-                      alt="SAM2 disease segmentation overlay"
-                      className="w-full h-auto"
-                    />
+              {/* SAM2 */}
+              {res.sam_mask_image && (
+                <div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
+                    <BrainCircuit size={12} color={T.t4} strokeWidth={1.5} />
+                    <p style={{ margin: 0, fontSize: 10, fontWeight: 600, letterSpacing: "0.15em", textTransform: "uppercase", color: T.t4 }}>SAM2 Overlay</p>
+                  </div>
+                  <div style={{ borderRadius: 12, overflow: "hidden", border: `1px solid ${T.b1}` }}>
+                    <img src={`data:image/jpeg;base64,${res.sam_mask_image}`} alt="SAM2" style={{ width: "100%", display: "block" }} />
                   </div>
                 </div>
               )}
             </div>
           )}
 
-          {/* Empty state */}
-          {!isLoading && !result && (
-            <div className="flex flex-col items-center justify-center h-48 text-gray-400 gap-2">
-              <BrainCircuit className="w-10 h-10 text-gray-200" />
-              <p className="text-sm">Results will appear here after analysis.</p>
+          {!load && !res && (
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: 200, gap: 16 }}>
+              <div style={{ width: 64, height: 64, borderRadius: 20, background: T.cardAlt, border: `1px solid ${T.b1}`, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <BrainCircuit size={28} color={T.b2} strokeWidth={1.5} />
+              </div>
+              <div style={{ textAlign: "center" }}>
+                <p style={{ margin: 0, fontSize: 14, color: T.t3, fontWeight: 300 }}>Awaiting analysis</p>
+                <p style={{ margin: "4px 0 0", fontSize: 12, color: T.t4, fontWeight: 300 }}>Upload an image to begin</p>
+              </div>
             </div>
           )}
+        </div>
+      </div>
 
-        </CardContent>
-      </Card>
-    </div>
+      <style>{`
+        @media (max-width: 767px) {
+          .mh-uploader { grid-template-columns: 1fr !important; }
+        }
+      `}</style>
+    </>
   );
 }

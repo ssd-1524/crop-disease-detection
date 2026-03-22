@@ -3,285 +3,203 @@
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import {
-  ArrowLeft,
-  CheckCircle,
-  AlertTriangle,
-  BrainCircuit,
-  Calendar,
-  Percent,
-  FlaskConical,
-  Circle,
-  Layers,
-} from "lucide-react";
+import { ArrowLeft, CheckCircle, AlertTriangle, BrainCircuit, Calendar, FlaskConical, Microscope } from "lucide-react";
 import Link from "next/link";
 
-// ── Skeleton ───────────────────────────────────────────────────────────────────
-const SkeletonBlock = ({ className }) => (
-  <div className={`animate-pulse rounded-lg bg-gray-200 ${className}`} />
-);
+const T = {
+  font: "'Outfit', system-ui, sans-serif",
+  bg: "#09090b", card: "#18181b", cardAlt: "#111113",
+  b1: "#27272a", b2: "#3f3f46",
+  t1: "#f4f4f5", t2: "#a1a1aa", t3: "#71717a", t4: "#52525b",
+  em: "#10b981", emL: "#34d399", emBg: "#052014", emBd: "#14532d",
+  am: "#f59e0b", amBg: "#1c1107", amBd: "#78350f",
+  or: "#f97316", orBg: "#1a0a02", orBd: "#7c2d12",
+  rd: "#ef4444", rdBg: "#1c0606", rdBd: "#7f1d1d",
+};
 
-const SkeletonLoader = () => (
-  <div className="space-y-8">
-    <SkeletonBlock className="h-7 w-40" />
-    <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-      <SkeletonBlock className="h-96 w-full" />
-      <div className="space-y-6">
-        <SkeletonBlock className="h-12 w-3/4" />
-        <SkeletonBlock className="h-8 w-1/2" />
-        <SkeletonBlock className="h-10 w-full" />
-        <SkeletonBlock className="h-8 w-1/3" />
-        <SkeletonBlock className="h-8 w-2/3" />
+const SEV = {
+  Mild: { bar: "#f59e0b", txt: "#f59e0b", bg: "#1c1107", bd: "#78350f" },
+  Moderate: { bar: "#f97316", txt: "#f97316", bg: "#1a0a02", bd: "#7c2d12" },
+  Severe: { bar: "#ef4444", txt: "#ef4444", bg: "#1c0606", bd: "#7f1d1d" },
+  _: { bar: T.b2, txt: T.t3, bg: T.cardAlt, bd: T.b1 },
+};
+
+function Skel({ w = "100%", h = 16 }) {
+  return <div style={{ width: w, height: h, borderRadius: 12, background: T.b2, opacity: 0.5 }} />;
+}
+
+function StatCard({ icon: Icon, label, children }) {
+  return (
+    <div style={{ background: T.cardAlt, border: `1px solid ${T.b1}`, borderRadius: 12, padding: "14px 16px" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
+        <Icon size={12} color={T.t4} strokeWidth={1.5} />
+        <p style={{ margin: 0, fontSize: 10, fontWeight: 600, letterSpacing: "0.15em", textTransform: "uppercase", color: T.t4 }}>{label}</p>
       </div>
-    </div>
-  </div>
-);
-
-// ── Severity helpers (mirrors ImageUploader) ───────────────────────────────────
-const getSeverityColor = (label) => {
-  switch (label) {
-    case "Mild": return "text-yellow-500";
-    case "Moderate": return "text-orange-500";
-    case "Severe": return "text-red-600";
-    default: return "text-gray-400";
-  }
-};
-
-const getSeverityBarColor = (pct) => {
-  if (pct < 5) return "bg-yellow-400";
-  if (pct < 15) return "bg-orange-500";
-  return "bg-red-600";
-};
-
-// ── Stat row ───────────────────────────────────────────────────────────────────
-const StatRow = ({ icon: Icon, label, children }) => (
-  <div className="flex items-start gap-3">
-    <div className="mt-0.5 w-8 h-8 rounded-lg bg-gray-100 flex items-center justify-center flex-shrink-0">
-      <Icon className="w-4 h-4 text-gray-500" />
-    </div>
-    <div className="flex-1 min-w-0">
-      <p className="text-xs text-gray-400 uppercase tracking-wide mb-0.5">{label}</p>
       {children}
     </div>
-  </div>
-);
+  );
+}
 
-// ── Main page ──────────────────────────────────────────────────────────────────
 export default function AnalysisDetailPage() {
-  const params = useParams();
-  const id = params.id;
+  const { id } = useParams();
   const supabase = createClient();
-
   const [analysis, setAnalysis] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
   useEffect(() => {
-    const fetchAnalysis = async () => {
+    const run = async () => {
       if (!id) return;
       setLoading(true);
-
-      const { data, error: fetchError } = await supabase
-        .from("analyses")
-        .select("*")
-        .eq("id", id)
-        .single();
-
-      if (fetchError) {
-        console.error("Error fetching analysis:", fetchError);
-        setError("Failed to load analysis details.");
-        setLoading(false);
-        return;
-      }
-
-      // Signed URL — non-fatal if it fails
-      const { data: urlData, error: urlError } = await supabase.storage
-        .from("maize-images")
-        .createSignedUrl(data.image_path, 3600);
-
-      setAnalysis({
-        ...data,
-        signedImageUrl: urlError ? null : urlData.signedUrl,
-      });
+      const { data, error: e } = await supabase.from("analyses").select("*").eq("id", id).single();
+      if (e) { setError("Failed to load analysis."); setLoading(false); return; }
+      const { data: u, error: ue } = await supabase.storage.from("maize-images").createSignedUrl(data.image_path, 3600);
+      setAnalysis({ ...data, signedImageUrl: ue ? null : u.signedUrl });
       setLoading(false);
     };
+    run();
+  }, [id]);
 
-    fetchAnalysis();
-  }, [id]);   // ← removed `supabase` from deps (stable client reference)
-
-  // ── Loading ────────────────────────────────────────────────────────────────
-  if (loading) {
-    return (
-      <div className="container mx-auto p-4 md:p-8 pt-24">
-        <SkeletonLoader />
-      </div>
-    );
-  }
-
-  // ── Error ──────────────────────────────────────────────────────────────────
-  if (error || !analysis) {
-    return (
-      <div className="container mx-auto p-4 md:p-8 pt-24 text-center">
-        <BackLink />
-        <div className="mt-12 flex flex-col items-center gap-3 text-gray-500">
-          <AlertTriangle className="w-10 h-10 text-red-400" />
-          <p className="text-red-500 font-medium">{error ?? "Analysis not found."}</p>
+  if (loading) return (
+    <div style={{ minHeight: "100vh", background: T.bg, fontFamily: T.font }}>
+      <div style={{ maxWidth: 960, margin: "0 auto", padding: "112px 24px 64px" }}>
+        <Skel w={100} h={16} />
+        <div style={{ display: "grid", gridTemplateColumns: "3fr 2fr", gap: 16, marginTop: 32 }}>
+          <Skel h={320} /><div style={{ display: "flex", flexDirection: "column", gap: 12 }}><Skel h={80} /><Skel h={60} /><Skel h={100} /><Skel h={48} /></div>
         </div>
       </div>
-    );
-  }
+    </div>
+  );
+
+  if (error || !analysis) return (
+    <div style={{ minHeight: "100vh", background: T.bg, fontFamily: T.font, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 20 }}>
+      <div style={{ width: 56, height: 56, borderRadius: 18, background: T.rdBg, border: `1px solid ${T.rdBd}`, display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <AlertTriangle size={24} color={T.rd} strokeWidth={1.5} />
+      </div>
+      <p style={{ margin: 0, fontSize: 14, color: T.t3, fontWeight: 300 }}>{error ?? "Analysis not found."}</p>
+      <Link href="/dashboard" style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 13, color: T.t3, textDecoration: "none", fontWeight: 500 }}>
+        <ArrowLeft size={13} /> Back to Dashboard
+      </Link>
+    </div>
+  );
 
   const isHealthy = analysis.prediction === "Healthy";
-  const ResultIcon = isHealthy ? CheckCircle : AlertTriangle;
-  const resultColor = isHealthy ? "text-green-500" : "text-orange-500";
-  const severityColor = getSeverityColor(analysis.severity_label);
-  const showSeverity = !isHealthy && analysis.severity_percentage != null;
-  const formattedDate = new Date(analysis.created_at).toLocaleString(undefined, {
-    dateStyle: "medium",
-    timeStyle: "short",
-  });
-
-  // ── Replace underscores for display ───────────────────────────────────────
-  const predictionLabel = analysis.prediction?.replace(/_/g, " ") ?? "—";
+  const pred = analysis.prediction?.replace(/_/g, " ") ?? "—";
+  const sev = SEV[analysis.severity_label] ?? SEV._;
+  const showSev = !isHealthy && analysis.severity_percentage != null;
+  const date = new Date(analysis.created_at).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
 
   return (
-    <div className="container mx-auto p-4 md:p-8 pt-24">
-      <BackLink />
+    <div style={{ minHeight: "100vh", background: T.bg, fontFamily: T.font }}>
+      <style>{`@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@200;300;400;500;600;700&display=swap');`}</style>
+      <div style={{ maxWidth: 960, margin: "0 auto", padding: "112px 24px 64px" }}>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-8 items-start mt-6">
+        <Link href="/dashboard" style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, color: T.t4, textDecoration: "none", fontWeight: 500, marginBottom: 28 }}>
+          <ArrowLeft size={13} /> Back to Dashboard
+        </Link>
 
-        {/* ── Image Card ──────────────────────────────────────────────────── */}
-        <Card className="overflow-hidden">
-          <CardHeader>
-            <CardTitle className="text-base">Uploaded Image</CardTitle>
-          </CardHeader>
-          <CardContent className="p-0">
-            {analysis.signedImageUrl ? (
-              <img
-                src={analysis.signedImageUrl}
-                alt={`Leaf image — ${predictionLabel}`}
-                className="w-full h-auto object-cover"
-              />
-            ) : (
-              <div className="w-full h-72 bg-gray-100 flex flex-col items-center
-                justify-center gap-2 text-gray-400">
-                <BrainCircuit className="w-8 h-8 text-gray-300" />
-                <p className="text-sm">Image unavailable</p>
+        <div style={{ marginBottom: 28 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+            <div style={{ width: 6, height: 6, borderRadius: "50%", background: T.emL, boxShadow: "0 0 8px rgba(52,211,153,0.9)" }} />
+            <span style={{ fontSize: 11, fontWeight: 600, letterSpacing: "0.18em", textTransform: "uppercase", color: T.emL }}>Analysis Report</span>
+          </div>
+          <h1 style={{ margin: "0 0 6px", fontSize: 30, fontWeight: 200, color: T.t1, letterSpacing: "-0.02em" }}>{pred}</h1>
+          <p style={{ margin: 0, fontSize: 13, color: T.t4, fontWeight: 300 }}>{date}</p>
+        </div>
+
+        {/* 5-col grid */}
+        <div style={{ display: "grid", gridTemplateColumns: "3fr 2fr", gap: 16, alignItems: "start" }}>
+
+          {/* Image */}
+          <div style={{ background: T.card, border: `1px solid ${T.b1}`, borderRadius: 16, overflow: "hidden", boxShadow: "0 8px 32px rgba(0,0,0,0.4)" }}>
+            <div style={{ padding: "14px 20px", borderBottom: `1px solid ${T.b1}` }}>
+              <p style={{ margin: 0, fontSize: 10, fontWeight: 600, letterSpacing: "0.15em", textTransform: "uppercase", color: T.t4 }}>Uploaded Image</p>
+            </div>
+            {analysis.signedImageUrl
+              ? <img src={analysis.signedImageUrl} alt={pred} style={{ width: "100%", display: "block" }} />
+              : <div style={{ height: 280, background: T.bg, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 12 }}>
+                <BrainCircuit size={32} color={T.b2} strokeWidth={1.5} />
+                <p style={{ margin: 0, fontSize: 12, color: T.t4, fontWeight: 300 }}>Image unavailable</p>
               </div>
-            )}
-          </CardContent>
-        </Card>
+            }
+          </div>
 
-        {/* ── Details Card ────────────────────────────────────────────────── */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Analysis Details</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-6">
-
+          {/* Details */}
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
             {/* Prediction */}
-            <div className="flex items-center gap-4 p-4 rounded-xl bg-gray-50">
-              <ResultIcon className={`w-12 h-12 flex-shrink-0 ${resultColor}`} />
+            <div style={{ padding: 16, borderRadius: 16, display: "flex", alignItems: "center", gap: 14, background: isHealthy ? T.emBg : "#1a0c02", border: `1px solid ${isHealthy ? T.emBd : "#7c3311"}` }}>
+              <div style={{ width: 44, height: 44, borderRadius: 12, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", background: isHealthy ? "#0a3320" : "#2d1206", boxShadow: isHealthy ? "0 0 16px rgba(16,185,129,0.2)" : "none" }}>
+                {isHealthy ? <CheckCircle size={20} color={T.emL} strokeWidth={1.5} /> : <AlertTriangle size={20} color="#fb923c" strokeWidth={1.5} />}
+              </div>
               <div>
-                <p className="text-xs text-gray-400 uppercase tracking-wide">Prediction</p>
-                <p className="text-2xl font-bold leading-tight">{predictionLabel}</p>
+                <p style={{ margin: 0, fontSize: 10, fontWeight: 600, letterSpacing: "0.15em", textTransform: "uppercase", color: T.t4 }}>Prediction</p>
+                <p style={{ margin: "3px 0 0", fontSize: 18, fontWeight: 700, color: T.t1, lineHeight: 1.2 }}>{pred}</p>
               </div>
             </div>
 
-            {/* Confidence */}
-            <StatRow icon={FlaskConical} label="Confidence">
-              <p className="text-xl font-semibold">{analysis.confidence}</p>
-            </StatRow>
+            <StatCard icon={FlaskConical} label="Confidence">
+              <p style={{ margin: 0, fontSize: 24, fontWeight: 200, color: T.t1, letterSpacing: "-0.02em" }}>{analysis.confidence}</p>
+            </StatCard>
 
-            {/* Severity — hidden for Healthy */}
-            {showSeverity && (
-              <StatRow icon={Percent} label="Disease Severity">
-                <div className="space-y-2 mt-1">
-                  <div className="w-full bg-gray-200 rounded-full h-3 overflow-hidden">
-                    <div
-                      className={`h-3 rounded-full transition-all duration-700
-                        ${getSeverityBarColor(analysis.severity_percentage)}`}
-                      style={{ width: `${analysis.severity_percentage}%` }}
-                    />
+            {showSev && (
+              <div style={{ background: T.card, border: `1px solid ${T.b1}`, borderRadius: 12, padding: "14px 16px" }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <Microscope size={12} color={T.t4} strokeWidth={1.5} />
+                    <p style={{ margin: 0, fontSize: 10, fontWeight: 600, letterSpacing: "0.15em", textTransform: "uppercase", color: T.t4 }}>Severity</p>
                   </div>
-                  <div className="flex items-center justify-between">
-                    <span className={`text-sm font-semibold ${severityColor}`}>
-                      {analysis.severity_label}
-                    </span>
-                    <span className="text-xl font-bold">
-                      {analysis.severity_percentage}%
-                    </span>
-                  </div>
-
-                  {/* Spot / Region breakdown */}
-                  {(analysis.spot_count > 0 || analysis.region_count > 0) && (
-                    <div className="grid grid-cols-2 gap-3 pt-2 border-t border-gray-200 mt-2">
-                      <div className="flex items-center gap-2">
-                        <div className="w-3 h-3 rounded-full bg-orange-400 flex-shrink-0" />
-                        <div>
-                          <p className="text-xs text-gray-400">Spots</p>
-                          <p className="text-sm font-semibold">
-                            {analysis.spot_count ?? 0} ({analysis.spot_severity_pct ?? 0}%)
-                          </p>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <div className="w-3 h-3 rounded-full bg-red-500 flex-shrink-0" />
-                        <div>
-                          <p className="text-xs text-gray-400">Regions</p>
-                          <p className="text-sm font-semibold">
-                            {analysis.region_count ?? 0} ({analysis.region_severity_pct ?? 0}%)
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                  )}
+                  <span style={{ fontSize: 11, fontWeight: 600, padding: "3px 10px", borderRadius: 99, background: sev.bg, color: sev.txt, border: `1px solid ${sev.bd}` }}>
+                    {analysis.severity_label}
+                  </span>
                 </div>
-              </StatRow>
+                <div style={{ width: "100%", height: 6, background: T.b2, borderRadius: 99, overflow: "hidden" }}>
+                  <div style={{ height: "100%", borderRadius: 99, background: sev.bar, width: `${analysis.severity_percentage}%`, transition: "width 0.7s ease" }} />
+                </div>
+                <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", marginTop: 8 }}>
+                  <p style={{ margin: 0, fontSize: 11, color: T.t4, fontWeight: 300 }}>Affected area</p>
+                  <p style={{ margin: 0, fontSize: 28, fontWeight: 200, color: sev.txt, letterSpacing: "-0.02em", lineHeight: 1 }}>
+                    {analysis.severity_percentage}<span style={{ fontSize: 13, color: T.t4 }}>%</span>
+                  </p>
+                </div>
+                {(analysis.spot_count > 0 || analysis.region_count > 0) && (
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 12, paddingTop: 12, borderTop: `1px solid ${T.b1}` }}>
+                    {[{ l: "Spots", n: analysis.spot_count ?? 0, p: analysis.spot_severity_pct ?? 0, dot: "#fbbf24" }, { l: "Regions", n: analysis.region_count ?? 0, p: analysis.region_severity_pct ?? 0, dot: "#f87171" }]
+                      .map(({ l, n, p, dot }) => (
+                        <div key={l} style={{ background: T.cardAlt, borderRadius: 10, padding: "10px 12px" }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
+                            <div style={{ width: 8, height: 8, borderRadius: "50%", background: dot }} />
+                            <p style={{ margin: 0, fontSize: 10, fontWeight: 600, letterSpacing: "0.1em", textTransform: "uppercase", color: T.t4 }}>{l}</p>
+                          </div>
+                          <p style={{ margin: 0, fontSize: 16, fontWeight: 600, color: T.t2 }}>{n}</p>
+                          <p style={{ margin: "2px 0 0", fontSize: 11, color: T.t4 }}>{p}% area</p>
+                        </div>
+                      ))}
+                  </div>
+                )}
+              </div>
             )}
 
-            {/* Date */}
-            <StatRow icon={Calendar} label="Analysed On">
-              <p className="text-base">{formattedDate}</p>
-            </StatRow>
+            <StatCard icon={Calendar} label="Analysed On">
+              <p style={{ margin: 0, fontSize: 13, color: T.t2, fontWeight: 300 }}>{date}</p>
+            </StatCard>
+          </div>
+        </div>
 
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* ── SAM2 Overlay Card (full-width, below the grid) ──────────────── */}
-      {analysis.sam_mask_image && (
-        <Card className="mt-8">
-          <CardHeader>
-            <CardTitle className="text-base flex items-center gap-2">
-              <BrainCircuit className="w-5 h-5" />
-              SAM2 Disease Overlay
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="p-0">
-            <div className="rounded-b-xl overflow-hidden bg-gray-900">
-              <img
-                src={`data:image/jpeg;base64,${analysis.sam_mask_image}`}
-                alt="SAM2 disease segmentation overlay"
-                className="w-full h-auto"
-              />
+        {/* SAM2 */}
+        {analysis.sam_mask_image && (
+          <div style={{ marginTop: 16, background: T.card, border: `1px solid ${T.b1}`, borderRadius: 16, overflow: "hidden", boxShadow: "0 8px 32px rgba(0,0,0,0.4)" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "14px 20px", borderBottom: `1px solid ${T.b1}` }}>
+              <div style={{ width: 24, height: 24, borderRadius: 8, background: T.emBg, border: `1px solid ${T.emBd}`, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <BrainCircuit size={12} color={T.emL} strokeWidth={1.5} />
+              </div>
+              <p style={{ margin: 0, fontSize: 10, fontWeight: 600, letterSpacing: "0.15em", textTransform: "uppercase", color: T.t4 }}>SAM2 Disease Segmentation Overlay</p>
             </div>
-          </CardContent>
-        </Card>
-      )}
+            <div style={{ background: T.bg }}>
+              <img src={`data:image/jpeg;base64,${analysis.sam_mask_image}`} alt="SAM2" style={{ width: "100%", display: "block" }} />
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
-
-// ── Back link ──────────────────────────────────────────────────────────────────
-const BackLink = () => (
-  <Link
-    href="/dashboard"
-    className="inline-flex items-center gap-2 text-sm text-gray-500
-      hover:text-gray-900 transition-colors"
-  >
-    <ArrowLeft className="w-4 h-4" />
-    Back to Dashboard
-  </Link>
-);

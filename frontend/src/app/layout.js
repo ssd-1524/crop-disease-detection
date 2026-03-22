@@ -15,7 +15,7 @@ export const metadata = {
 
 export default function RootLayout({ children }) {
   return (
-    <html lang="en">
+    <html lang="en" className="dark">
       {/* Add suppressHydrationWarning to the body tag */}
       <body
         className={`${inter.className} animated-gradient`}
