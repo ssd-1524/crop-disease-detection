@@ -71,7 +71,7 @@ class CustomMobileNetV2_3(nn.Module):
 
 
 # ── 3. Load Models ─────────────────────────────────────────────────────────────
-CLASSIFIER_FILENAME = "CustomMobileNetV2_2_best.pth"
+CLASSIFIER_FILENAME = "CustomMobileNetV2_2_best copy.pth"
 SAM2_CHECKPOINT     = "sam2.1_hiera_large.pt"
 SAM2_CONFIG         = "configs/sam2.1/sam2.1_hiera_l.yaml"
 
@@ -582,43 +582,64 @@ def _mask_to_sam2_logit(binary_mask: np.ndarray) -> np.ndarray:
     return logit[np.newaxis, :, :]
 
 
+def _skeletonize_cv2(binary: np.ndarray) -> np.ndarray:
+    """
+    Pure OpenCV/NumPy morphological skeleton — no skimage dependency.
+
+    Uses iterative morphological thinning: each iteration erodes the mask by
+    one pixel and accumulates the boundary (eroded XOR opened) into the
+    skeleton until the mask is fully consumed. Equivalent to Zhang-Suen
+    thinning in behaviour, zero external dependencies.
+    """
+    img  = (binary > 0).astype(np.uint8)
+    skel = np.zeros_like(img)
+    kern = cv2.getStructuringElement(cv2.MORPH_CROSS, (3, 3))
+    while True:
+        eroded = cv2.erode(img, kern)
+        opened = cv2.dilate(eroded, kern)
+        diff   = cv2.subtract(img, opened)
+        skel   = cv2.bitwise_or(skel, diff)
+        img    = eroded
+        if cv2.countNonZero(img) == 0:
+            break
+    return skel
+
+
 def _sample_points_in_mask(binary: np.ndarray, n: int) -> np.ndarray:
     """
-    FIX: Improved to cover elongated shapes (GLS streaks).
+    Sample n prompt points distributed across the mask.
 
-    Original greedy distance-transform approach clusters all points near the
-    centroid of round blobs. For long narrow GLS streaks the first point sits
-    near the centre and subsequent calls find nothing new because the radius
-    exclusion covers most of the thin stripe.
+    For elongated shapes (aspect ratio > 2.5, e.g. GLS streaks): skeletonises
+    the mask with pure OpenCV morphological thinning and samples n points
+    evenly along the skeleton so the full length of the lesion is covered.
 
-    New approach: skeletonise the mask first, then sample evenly along the
-    skeleton so points are distributed across the full length of the lesion.
-    Falls back to the original distance-transform method for round/compact blobs.
+    For compact shapes (aspect ratio <= 2.5, e.g. rust pustule clusters):
+    uses the original greedy distance-transform strategy.
+
+    No external dependencies beyond OpenCV and NumPy.
     """
     if not np.any(binary):
         return np.empty((0, 2), dtype=np.float32)
 
-    # Compute aspect ratio to decide strategy
     contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     use_skeleton = False
     if contours:
         rect = cv2.minAreaRect(np.vstack(contours))
         rw, rh = rect[1]
         aspect = max(rw, rh) / (min(rw, rh) + 1e-6)
-        use_skeleton = aspect > 2.5   # elongated shape
+        use_skeleton = aspect > 2.5
 
     if use_skeleton:
-        # Thin the mask to a 1-pixel skeleton and sample evenly along it
-        from skimage.morphology import skeletonize
-        skel = skeletonize(binary > 0).astype(np.uint8)
+        skel = _skeletonize_cv2(binary)
         ys, xs = np.where(skel > 0)
         if len(xs) >= n:
             indices = np.linspace(0, len(xs) - 1, n, dtype=int)
             return np.stack([xs[indices], ys[indices]], axis=1).astype(np.float32)
         elif len(xs) > 0:
             return np.stack([xs, ys], axis=1).astype(np.float32)
+        # skeleton empty (very small mask) — fall through to greedy
 
-    # Fallback: distance-transform greedy for compact blobs
+    # Greedy distance-transform for compact blobs
     dist = cv2.distanceTransform(binary, cv2.DIST_L2, 5)
     used = np.zeros_like(dist)
     pts  = []
