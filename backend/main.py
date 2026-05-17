@@ -79,7 +79,8 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 classifier = CustomMobileNetV2_3(num_classes=len(CLASS_NAMES))
 classifier.load_state_dict(
-    torch.load(CLASSIFIER_FILENAME, map_location=device, weights_only=False)
+    torch.load(CLASSIFIER_FILENAME, map_location=device, weights_only=False),
+    strict=False,
 )
 classifier.to(device)
 classifier.eval()
