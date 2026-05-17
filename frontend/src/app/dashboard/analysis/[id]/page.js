@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
-import { ArrowLeft, CheckCircle, AlertTriangle, BrainCircuit, Calendar, FlaskConical, Microscope } from "lucide-react";
+import { ArrowLeft, CheckCircle, AlertTriangle, BrainCircuit, Calendar, Microscope } from "lucide-react";
 import Link from "next/link";
 
 const T = {
@@ -137,9 +137,7 @@ export default function AnalysisDetailPage() {
               </div>
             </div>
 
-            <StatCard icon={FlaskConical} label="Confidence">
-              <p style={{ margin: 0, fontSize: 24, fontWeight: 200, color: T.t1, letterSpacing: "-0.02em" }}>{analysis.confidence}</p>
-            </StatCard>
+
 
             {showSev && (
               <div style={{ background: T.card, border: `1px solid ${T.b1}`, borderRadius: 12, padding: "14px 16px" }}>

@@ -239,7 +239,7 @@ export default function ImageUploader() {
       const data = await r.json();
       if (data.error) throw new Error(data.error);
       await supabase.from("analyses").insert({
-        image_path: fp, prediction: data.prediction, confidence: data.confidence,
+        image_path: fp, prediction: data.prediction,
         severity_percentage: data.severity_percentage, severity_label: data.severity_label,
         sam_mask_image: data.sam_mask_image ?? null, spot_count: data.spot_count ?? 0,
         region_count: data.region_count ?? 0, spot_severity_pct: data.spot_severity_pct ?? 0,
@@ -331,10 +331,6 @@ export default function ImageUploader() {
                     {res.prediction.replace(/_/g, " ")}
                   </p>
                 </div>
-                <div style={{ textAlign: "right", flexShrink: 0 }}>
-                  <p style={{ margin: 0, fontSize: 10, fontWeight: 600, letterSpacing: "0.15em", textTransform: "uppercase", color: T.t4 }}>Confidence</p>
-                  <p style={{ margin: "3px 0 0", fontSize: 16, fontWeight: 600, color: T.t2 }}>{res.confidence}</p>
-                </div>
               </div>
 
               {/* Severity */}
@@ -373,16 +369,24 @@ export default function ImageUploader() {
                 </div>
               )}
 
-              {/* SAM2 */}
-              {res.sam_mask_image && (
-                <div>
-                  <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
-                    <BrainCircuit size={12} color={T.t4} strokeWidth={1.5} />
-                    <p style={{ margin: 0, fontSize: 10, fontWeight: 600, letterSpacing: "0.15em", textTransform: "uppercase", color: T.t4 }}>SAM2 Overlay</p>
-                  </div>
-                  <div style={{ borderRadius: 12, overflow: "hidden", border: `1px solid ${T.b1}` }}>
-                    <img src={`data:image/jpeg;base64,${res.sam_mask_image}`} alt="SAM2" style={{ width: "100%", display: "block" }} />
-                  </div>
+              {/* Diagnostic images */}
+              {(res.rough_mask_image || res.bboxes_image || res.sam_mask_image) && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                  {[
+                    { key: "rough_mask_image", label: "Otsu Rough Mask" },
+                    { key: "bboxes_image",     label: "Bounding Boxes" },
+                    { key: "sam_mask_image",   label: "SAM2 Final Overlay" },
+                  ].map(({ key, label }) => res[key] && (
+                    <div key={key}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
+                        <BrainCircuit size={12} color={T.t4} strokeWidth={1.5} />
+                        <p style={{ margin: 0, fontSize: 10, fontWeight: 600, letterSpacing: "0.15em", textTransform: "uppercase", color: T.t4 }}>{label}</p>
+                      </div>
+                      <div style={{ borderRadius: 12, overflow: "hidden", border: `1px solid ${T.b1}` }}>
+                        <img src={`data:image/jpeg;base64,${res[key]}`} alt={label} style={{ width: "100%", display: "block" }} />
+                      </div>
+                    </div>
+                  ))}
                 </div>
               )}
             </div>
