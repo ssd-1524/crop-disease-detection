@@ -1,4 +1,4 @@
-import os
+﻿import os
 import cv2
 import numpy as np
 import base64
@@ -15,7 +15,7 @@ from sam2.automatic_mask_generator import SAM2AutomaticMaskGenerator
 from PIL import Image
 import uvicorn
 
-# ── 1. App Setup ───────────────────────────────────────────────────────────────
+# â”€â”€ 1. App Setup â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 app = FastAPI()
 
 app.add_middleware(
@@ -27,7 +27,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ── 2. Model Definition ────────────────────────────────────────────────────────
+# â”€â”€ 2. Model Definition â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 CLASS_NAMES = ["Blight", "Common_Rust", "Gray_Leaf_Spot", "Healthy"]
 
 
@@ -70,7 +70,7 @@ class CustomMobileNetV2_3(nn.Module):
         }
 
 
-# ── 3. Load Models ─────────────────────────────────────────────────────────────
+# â”€â”€ 3. Load Models â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 CLASSIFIER_FILENAME = "CustomMobileNetV2_2_best copy.pth"
 SAM2_CHECKPOINT     = "sam2.1_hiera_large.pt"
 SAM2_CONFIG         = "configs/sam2.1/sam2.1_hiera_l.yaml"
@@ -90,8 +90,8 @@ sam_predictor = SAM2ImagePredictor(sam2_model)
 print("SAM2 loaded successfully.")
 
 
-# ── 4. Inference helper ────────────────────────────────────────────────────────
-def classify_image_with_tta(img_rgb: np.ndarray, n_augments: int = 6) -> tuple[str, str]:
+# â”€â”€ 4. Inference helper â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+def classify_image_with_tta(img_rgb: np.ndarray, n_augments: int = 6) -> str:
     tta_tf = transforms.Compose([
         transforms.Resize(256),
         transforms.RandomResizedCrop(224, scale=(0.8, 1.0)),
@@ -116,349 +116,36 @@ def classify_image_with_tta(img_rgb: np.ndarray, n_augments: int = 6) -> tuple[s
 
     avg = torch.stack(all_probs).mean(0)[0]
     idx = avg.argmax().item()
-    return CLASS_NAMES[idx], f"{avg[idx].item() * 100:.2f}%"
+    return CLASS_NAMES[idx]
 
 
-# ── 5. Disease colour profiles ─────────────────────────────────────────────────
-#
-# Blight — expanded to cover all NCLB appearance stages:
-#   • Water-soaked gray-green (early)
-#   • Tan/straw cigar lesion body (mid)
-#   • Dark brown necrotic centre (mature)
-#   • Yellow-green halo zone
-#   • Near-white bleached necrotic core
-#   departure_sensitivity raised 0.30 → 0.45 to flag moderate-saturation tan tissue
-#
-# Common_Rust — expanded to cover late-stage pustules:
-#   • Dark brown/black aged urediniospores (V 15-80)
-#   • Faded old pustules with yellow halo (H 20-35)
-#   LAB range added for dark mature rust
-#
-# Gray_Leaf_Spot — unchanged from previous fix pass
+# â”€â”€ 5. Otsu-based dynamic colour mask â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-DISEASE_COLOR_PROFILES = {
-    "Blight": {
-        "hsv_ranges": [
-            # Original tan/brown lesion body
-            (np.array([10, 50,  80]),  np.array([25, 200, 220])),
-            (np.array([5,  40,  40]),  np.array([15, 180, 160])),
-            # NEW: water-soaked early lesion — gray-green, low-moderate S
-            (np.array([35, 20,  60]),  np.array([75, 70,  160])),
-            # NEW: dark brown necrotic centre — low V, moderate-high S
-            (np.array([5,  55,  20]),  np.array([22, 200,  90])),
-            # NEW: yellow-green halo zone around lesion
-            (np.array([22, 60,  130]), np.array([38, 200, 240])),
-            # NEW: near-white bleached necrotic core
-            (np.array([0,  0,   180]), np.array([30, 35,  255])),
-        ],
-        "lab_ranges": [
-            # Original buff/tan
-            (np.array([60,  133, 145]), np.array([170, 155, 180])),
-            # NEW: dark necrotic tissue — low L, warm a/b
-            (np.array([20,  130, 135]), np.array([85,  152, 162])),
-            # NEW: near-white necrotic — high L, near-neutral
-            (np.array([155, 120, 128]), np.array([230, 134, 142])),
-        ],
-        "exclude_green_s_min":   45,   # was 55 — some blight-adjacent tissue has S 45-55
-        "morph_close_k":          7,   # was 5 — larger close to bridge yellow-halo to necrotic core
-        "morph_open_k":           3,
-        "use_green_departure":   True,
-        "departure_sensitivity": 0.45, # was 0.30 — flags moderate-S tan tissue (S < 45% of green median)
-        "use_blight_local":      True, # NEW
-    },
-    "Common_Rust": {
-        "hsv_ranges": [
-            # Fresh orange-brown pustules
-            (np.array([5,  25,  30]),  np.array([25, 255, 255])),
-            (np.array([0,  20,  25]),  np.array([8,  200, 180])),
-            (np.array([170, 20, 25]),  np.array([180, 200, 180])),
-            # NEW: late-stage dark brown/black urediniospores
-            (np.array([5,  60,  15]),  np.array([20, 220,  80])),
-            # NEW: faded old pustules with yellow-brown halo
-            (np.array([18, 40,  100]), np.array([35, 160, 200])),
-        ],
-        "lab_ranges": [
-            (np.array([30, 135, 140]), np.array([220, 185, 210])),
-            (np.array([15, 128, 130]), np.array([130, 162, 172])),
-            # NEW: dark mature rust — low L, warm tones
-            (np.array([10, 130, 132]), np.array([80,  158, 160])),
-        ],
-        "exclude_green_s_min":  40,
-        "morph_close_k":         3,
-        "morph_open_k":          0,   # MUST stay 0 — opening kills tiny pustules
-        "use_green_departure":  False,
-        "use_rust_local":       True,
-    },
-    "Gray_Leaf_Spot": {
-        "hsv_ranges": [
-            # Mature gray lesions — very low saturation, wide hue
-            (np.array([0,  0,   100]), np.array([35, 40,  245])),
-            # Mid-stage buff/straw — moderate S, tan hue
-            (np.array([10, 20,  70]),  np.array([35, 110, 220])),
-            # Early tan-yellow lesions — higher S, lighter V
-            (np.array([15, 30,  130]), np.array([38, 160, 255])),
-            # Dark brown edges of lesions
-            (np.array([5,  25,  45]),  np.array([22, 160, 165])),
-            # Near-white necrotic centres
-            (np.array([0,  0,   180]), np.array([30, 25,  255])),
-        ],
-        "lab_ranges": [
-            # Primary buff/gray range
-            (np.array([75, 124, 132]), np.array([175, 150, 168])),
-            # Darker lesion edges
-            (np.array([40, 124, 130]), np.array([120, 148, 162])),
-            # Near-neutral pale tissue
-            (np.array([140, 122, 126]), np.array([220, 136, 140])),
-        ],
-        "exclude_green_s_min":  28,   # was 30 — keep slightly permissive
-        "morph_close_k":        7,    # was 5 — close gaps between streak fragments
-        "morph_open_k":         2,    # was 3 — smaller open to keep thin streaks
-        "use_green_departure":  False,
-        "use_gls_local":        True,
-    },
-}
-
-
-# ── 6. Adaptive local-contrast detectors ──────────────────────────────────────
-
-def _detect_rust_local_contrast(
-    img_rgb: np.ndarray,
-    leaf_mask: np.ndarray,
-) -> np.ndarray:
-    """
-    Multi-scale local LAB warmth detector for Common Rust pustules.
-
-    Warmth = (a* − local_a*) + 0.6 × (b* − local_b*)
-
-    Changes vs original:
-    - 7px threshold 5.0 → 4.0: catches faint early-stage and light-coloured
-      pustules that the original missed.
-    - V floor 25 → 18: late-stage dark brown/black urediniospores have
-      V as low as 15–20; the original floor excluded them entirely.
-    - Added 35px scale at threshold 9.5: catches mature coalescing pustule
-      clusters that span a wider neighbourhood.
-    """
-    img_bgr = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2BGR)
-    lab     = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2LAB).astype(np.float32)
-    hsv     = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2HSV)
-    h_ch    = hsv[:, :, 0]
-    v_ch    = hsv[:, :, 2]
-
-    a_ch = lab[:, :, 1]
-    b_ch = lab[:, :, 2]
-
-    combined = np.zeros(img_rgb.shape[:2], dtype=np.uint8)
-
-    # (kernel_size, warmth_threshold)
-    # 7px  — micro-pustules (2-8 px)
-    # 15px — typical pustules
-    # 25px — larger mature pustules
-    # 35px — coalescing clusters (NEW)
-    for ksize, threshold in [(7, 4.0), (15, 6.5), (25, 8.0), (35, 9.5)]:
-        ksize   = ksize | 1
-        a_local = cv2.GaussianBlur(a_ch, (ksize, ksize), ksize / 3.0)
-        b_local = cv2.GaussianBlur(b_ch, (ksize, ksize), ksize / 3.0)
-        warmth  = (a_ch - a_local) + 0.6 * (b_ch - b_local)
-        hot     = (warmth > threshold).astype(np.uint8) * 255
-        combined = cv2.bitwise_or(combined, hot)
-
-    not_green = cv2.bitwise_not(cv2.inRange(h_ch, np.array([28]), np.array([90])))
-    # FIX: lowered 25 → 18 — dark mature pustules have V as low as 15-20
-    bright    = (v_ch > 18).astype(np.uint8) * 255
-    result    = cv2.bitwise_and(combined,  not_green)
-    result    = cv2.bitwise_and(result,    bright)
-    result    = cv2.bitwise_and(result,    leaf_mask)
-
-    kern   = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
-    result = cv2.morphologyEx(result, cv2.MORPH_CLOSE, kern)
-
-    leaf_area = int(np.count_nonzero(leaf_mask))
-    if leaf_area > 0 and int(np.count_nonzero(result)) / leaf_area > 0.55:
-        return np.zeros(img_rgb.shape[:2], dtype=np.uint8)
-
-    return result
-
-
-def _detect_gls_local_contrast(
-    img_rgb: np.ndarray,
-    leaf_mask: np.ndarray,
-    local_kernel: int = 21,        # was 25 — tighter local window finds smaller lesions
-    deficit_threshold: float = 14.0,  # was 28.0 — GLS has subtle dips (~15 units)
-    neib_threshold: float = 6.0,   # was 12.0 — less strict neighbourhood confirmation
-) -> np.ndarray:
-    """
-    Detect Gray Leaf Spot lesions via local HSV saturation contrast.
-
-    GLS lesions are elongated, tan/gray areas that are markedly LESS saturated
-    than surrounding green tissue.
-
-    Key changes vs original:
-    - `deficit_threshold` lowered 28 → 14: GLS saturation dips are subtle (~15–20
-      units), the original threshold missed most lesions entirely.
-    - `neib_threshold` lowered 12 → 6: neighbourhood confirmation was rejecting
-      real lesions because fragmented patches fail the neighbourhood check.
-    - `very_pale` S threshold raised 18 → 45: real GLS tissue has S ≈ 20–55;
-      original cutoff was too aggressive.
-    - Multi-scale: three kernel sizes to catch both narrow streaks and wide patches.
-    - Saturation+lightness dual-channel: adds an L-channel check so very dark
-      non-green pixels (soil, shadow) are excluded.
-    """
-    img_bgr = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2BGR)
-    hsv     = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2HSV).astype(np.float32)
-    lab     = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2LAB).astype(np.float32)
-
-    h_ch = hsv[:, :, 0].astype(np.uint8)
-    s_ch = hsv[:, :, 1]
-    v_ch = hsv[:, :, 2].astype(np.uint8)
-    l_ch = lab[:, :, 0]   # lightness — exclude very dark pixels
-
-    combined = np.zeros(img_rgb.shape[:2], dtype=np.uint8)
-
-    # Multi-scale: tight kernel catches thin streaks; wide kernel catches patches
-    for ksize, d_thresh, n_thresh in [
-        (11, deficit_threshold,        neib_threshold),
-        (21, deficit_threshold * 1.2,  neib_threshold * 1.1),
-        (35, deficit_threshold * 1.5,  neib_threshold * 1.3),
-    ]:
-        ksize   = ksize | 1
-        s_local = cv2.GaussianBlur(s_ch, (ksize, ksize), ksize / 3.0)
-        deficit = s_local - s_ch   # positive where pixel is LESS saturated than surroundings
-
-        neib_k     = 13 | 1
-        deficit_u8 = np.clip(deficit * 2 + 128, 0, 255).astype(np.uint8)
-        neib_u8    = cv2.GaussianBlur(deficit_u8, (neib_k, neib_k), neib_k / 3.0)
-        neib_score = (neib_u8.astype(np.float32) - 128) / 2.0
-
-        desaturated = ((deficit > d_thresh) & (neib_score > n_thresh)).astype(np.uint8) * 255
-        combined    = cv2.bitwise_or(combined, desaturated)
-
-    tan_hue   = cv2.inRange(h_ch, np.array([0]),  np.array([38]))
-    # FIX: raised threshold 18 → 45 — real GLS tissue has S up to ~55
-    very_pale = (hsv[:, :, 1] < 45).astype(np.uint8) * 255
-    hue_ok    = cv2.bitwise_or(tan_hue, very_pale)
-
-    not_green = cv2.bitwise_not(cv2.inRange(h_ch, np.array([28]), np.array([88])))
-    # FIX: lowered brightness floor 70 → 45 — some GLS lesions are darker
-    bright    = (v_ch > 45).astype(np.uint8) * 255
-    # Exclude very dark pixels (shadow / soil that sneaked through leaf mask)
-    not_dark  = (l_ch > 35).astype(np.uint8) * 255
-
-    result = cv2.bitwise_and(combined,  hue_ok)
-    result = cv2.bitwise_and(result,    not_green)
-    result = cv2.bitwise_and(result,    bright)
-    result = cv2.bitwise_and(result,    not_dark)
-    result = cv2.bitwise_and(result,    leaf_mask)
-
-    kern_c = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
-    kern_o = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
-    result = cv2.morphologyEx(result, cv2.MORPH_CLOSE, kern_c)
-    result = cv2.morphologyEx(result, cv2.MORPH_OPEN,  kern_o)
-
-    leaf_area = int(np.count_nonzero(leaf_mask))
-    if leaf_area > 0 and int(np.count_nonzero(result)) / leaf_area > 0.65:
-        return np.zeros(img_rgb.shape[:2], dtype=np.uint8)
-
-    return result
-
-
-def _detect_blight_local_contrast(
-    img_rgb: np.ndarray,
-    leaf_mask: np.ndarray,
-) -> np.ndarray:
-    """
-    Detect Blight (NCLB) lesions via dual local-contrast signals in LAB space.
-
-    NCLB presents three co-occurring visual signals that fixed HSV ranges miss:
-      1. Lightness deficit — lesion cores are locally darker than surrounding
-         healthy green tissue (L drops 8–25 units below neighbourhood mean).
-      2. Warmth shift — tan/brown tissue has elevated a* and b* relative to
-         the local green neighbourhood (same direction as rust but weaker signal
-         spread over a much larger area).
-      3. Saturation departure — necrotic and water-soaked tissue is less
-         saturated than neighbouring healthy leaf (S deficit ≥ 10).
-
-    All three signals are OR-ed so that any stage of the disease is caught:
-      - Water-soaked early stage: mainly S deficit + weak warmth
-      - Cigar-body mid stage: mainly lightness deficit + moderate warmth
-      - Necrotic mature stage: strong lightness deficit + S deficit
-
-    Gates:
-      - not_green: hue must not be in healthy green range
-      - bright: V > 35 (avoids camera noise in deep shadows)
-      - not_dark (L > 25): avoids picking up dark background/soil
-
-    Flood guard: >70 % leaf coverage → discard (likely to be a healthy
-    shaded leaf, not actual blight).
-
-    Kernel sizes use wide windows (21–55 px) because NCLB lesions are large
-    (2–15 cm) and the local neighbourhood must be big enough to span across
-    healthy tissue on both sides.
-    """
-    img_bgr = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2BGR)
-    lab     = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2LAB).astype(np.float32)
-    hsv     = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2HSV).astype(np.float32)
-
-    h_ch = hsv[:, :, 0].astype(np.uint8)
-    s_ch = hsv[:, :, 1]
-    v_ch = hsv[:, :, 2].astype(np.uint8)
-    l_ch = lab[:, :, 0]
-    a_ch = lab[:, :, 1]
-    b_ch = lab[:, :, 2]
-
-    combined = np.zeros(img_rgb.shape[:2], dtype=np.uint8)
-
-    # ── Signal 1: local lightness deficit ─────────────────────────────────────
-    # Large kernels needed — NCLB lesions are wide and the neighbourhood must
-    # span into adjacent healthy tissue to compute a meaningful local mean.
-    for ksize, l_thresh in [(21, 8.0), (35, 11.0), (55, 14.0)]:
-        ksize   = ksize | 1
-        l_local = cv2.GaussianBlur(l_ch, (ksize, ksize), ksize / 3.0)
-        deficit = l_local - l_ch          # positive where pixel is DARKER
-        dark    = (deficit > l_thresh).astype(np.uint8) * 255
-        combined = cv2.bitwise_or(combined, dark)
-
-    # ── Signal 2: local warmth boost (tan/brown hue shift) ────────────────────
-    for ksize, w_thresh in [(21, 4.0), (35, 6.0), (55, 8.0)]:
-        ksize   = ksize | 1
-        a_local = cv2.GaussianBlur(a_ch, (ksize, ksize), ksize / 3.0)
-        b_local = cv2.GaussianBlur(b_ch, (ksize, ksize), ksize / 3.0)
-        warmth  = (a_ch - a_local) + 0.5 * (b_ch - b_local)
-        warm    = (warmth > w_thresh).astype(np.uint8) * 255
-        combined = cv2.bitwise_or(combined, warm)
-
-    # ── Signal 3: local saturation departure (necrotic / water-soaked) ────────
-    for ksize, s_thresh in [(21, 10.0), (35, 13.0)]:
-        ksize   = ksize | 1
-        s_local = cv2.GaussianBlur(s_ch, (ksize, ksize), ksize / 3.0)
-        s_def   = s_local - s_ch          # positive where pixel is LESS saturated
-        desat   = (s_def > s_thresh).astype(np.uint8) * 255
-        combined = cv2.bitwise_or(combined, desat)
-
-    # ── Gates ─────────────────────────────────────────────────────────────────
-    not_green  = cv2.bitwise_not(cv2.inRange(h_ch, np.array([30]), np.array([88])))
-    bright     = (v_ch > 35).astype(np.uint8) * 255
-    not_dark   = (l_ch > 25).astype(np.uint8) * 255
-    # Must be tan/brown/neutral — exclude vivid non-green hues (e.g. flower)
-    tan_range  = cv2.inRange(h_ch, np.array([0]),  np.array([38]))
-    near_neut  = (s_ch < 90).astype(np.uint8) * 255
-    hue_ok     = cv2.bitwise_or(tan_range, near_neut)
-
-    result = cv2.bitwise_and(combined, not_green)
-    result = cv2.bitwise_and(result,   bright)
-    result = cv2.bitwise_and(result,   not_dark)
-    result = cv2.bitwise_and(result,   hue_ok)
-    result = cv2.bitwise_and(result,   leaf_mask)
-
-    kern_c = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9))
-    kern_o = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
-    result = cv2.morphologyEx(result, cv2.MORPH_CLOSE, kern_c)
-    result = cv2.morphologyEx(result, cv2.MORPH_OPEN,  kern_o)
-
-    leaf_area = int(np.count_nonzero(leaf_mask))
-    if leaf_area > 0 and int(np.count_nonzero(result)) / leaf_area > 0.70:
-        return np.zeros(img_rgb.shape[:2], dtype=np.uint8)
-
-    return result
+def _otsu_1d(values: np.ndarray) -> float:
+    """Otsu threshold on a flat uint8 array."""
+    if len(values) < 10:
+        return 128.0
+    hist, _ = np.histogram(values, bins=256, range=(0, 256))
+    total    = int(hist.sum())
+    if total == 0:
+        return 128.0
+    sum_all  = float(np.dot(np.arange(256, dtype=np.float64), hist))
+    sum_bg, w_bg, max_var, thresh = 0.0, 0, 0.0, 128.0
+    for t in range(256):
+        w_bg += hist[t]
+        if w_bg == 0:
+            continue
+        w_fg = total - w_bg
+        if w_fg == 0:
+            break
+        sum_bg += t * hist[t]
+        mu_bg   = sum_bg / w_bg
+        mu_fg   = (sum_all - sum_bg) / w_fg
+        var     = w_bg * w_fg * (mu_bg - mu_fg) ** 2
+        if var > max_var:
+            max_var = var
+            thresh  = float(t)
+    return thresh
 
 
 def create_color_mask_within_leaf(
@@ -467,63 +154,130 @@ def create_color_mask_within_leaf(
     disease_class: str = "Common_Rust",
 ) -> np.ndarray:
     """
-    Two-stage colour mask:
-      Stage 1 — Fixed HSV + LAB ranges  (fast, handles clear-cut cases)
-      Stage 2 — Adaptive local-contrast  (handles lighting variation + edge cases)
-    Results are OR-ed, then green pixels removed, then morphological cleanup.
+    Otsu-driven rough disease mask.
+
+    Instead of fixed HSV/LAB ranges the discriminating thresholds are computed
+    from the histogram of leaf pixels in the uploaded image, so they adapt to
+    each image's lighting and colour balance.
+
+    Common_Rust  â€” LAB a* warmth + HSV orange-hue band
+    Blight       â€” local lightness deficit + saturation drop + warm-hue band
+    Gray_Leaf_Spot â€” local saturation deficit + pale/grey pixels
     """
-    img_bgr  = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2BGR)
-    hsv      = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2HSV)
-    lab      = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2LAB)
-    h_ch, s_ch, v_ch = cv2.split(hsv)
+    img_bgr = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2BGR)
+    hsv_f   = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2HSV).astype(np.float32)
+    lab_f   = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2LAB).astype(np.float32)
+    hsv_u8  = hsv_f.astype(np.uint8)
 
-    profile  = DISEASE_COLOR_PROFILES.get(disease_class, DISEASE_COLOR_PROFILES["Common_Rust"])
-    combined = np.zeros(img_rgb.shape[:2], dtype=np.uint8)
+    h_ch = hsv_f[:, :, 0]
+    s_ch = hsv_f[:, :, 1]
+    v_ch = hsv_f[:, :, 2]
+    l_ch = lab_f[:, :, 0]
+    a_ch = lab_f[:, :, 1]
 
-    for lo, hi in profile["hsv_ranges"]:
-        combined |= cv2.inRange(hsv, lo, hi)
-    for lo, hi in profile["lab_ranges"]:
-        combined |= cv2.inRange(lab, lo, hi)
+    leaf_px  = leaf_mask > 0
+    h, w     = img_rgb.shape[:2]
+    combined = np.zeros((h, w), dtype=np.uint8)
 
-    if profile.get("use_green_departure", False):
-        green_zone = cv2.inRange(hsv, np.array([35, 45, 40]), np.array([85, 255, 255]))
-        green_zone = cv2.bitwise_and(green_zone, leaf_mask)
-        green_sats = s_ch[green_zone > 0]
-        if len(green_sats) > 100:
-            s_thresh  = float(np.median(green_sats)) * profile.get("departure_sensitivity", 0.30)
-            low_sat   = (s_ch.astype(np.float32) < s_thresh).astype(np.uint8) * 255
-            not_green = cv2.bitwise_not(cv2.inRange(h_ch, np.array([35]), np.array([85])))
-            bright    = (v_ch > 60).astype(np.uint8) * 255
-            dep       = cv2.bitwise_and(cv2.bitwise_and(low_sat, bright), not_green)
-            dep       = cv2.bitwise_and(dep, leaf_mask)
-            kern      = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
-            dep       = cv2.morphologyEx(dep, cv2.MORPH_CLOSE, kern)
-            dep       = cv2.morphologyEx(dep, cv2.MORPH_OPEN,  kern)
-            leaf_area = np.count_nonzero(leaf_mask)
-            if leaf_area > 0 and np.count_nonzero(dep) / leaf_area < 0.50:
-                combined = cv2.bitwise_or(combined, dep)
+    # â”€â”€ Otsu on leaf saturation â†’ dynamic green-exclusion threshold â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    s_leaf = s_ch[leaf_px].astype(np.uint8)
+    s_otsu = _otsu_1d(s_leaf)
+    green_mask = cv2.inRange(
+        hsv_u8,
+        np.array([28, max(15, int(s_otsu * 0.35)), 25], dtype=np.uint8),
+        np.array([90, 255, 255], dtype=np.uint8),
+    )
 
-    if profile.get("use_rust_local", False):
-        combined |= _detect_rust_local_contrast(img_rgb, leaf_mask)
+    if disease_class == "Common_Rust":
+        # LAB a* warmth (rust = elevated red-green axis)
+        a_leaf  = a_ch[leaf_px].astype(np.uint8)
+        a_otsu  = _otsu_1d(a_leaf)
+        warm    = (a_ch > max(a_otsu, 132.0)).astype(np.uint8) * 255
 
-    if profile.get("use_blight_local", False):
-        combined |= _detect_blight_local_contrast(img_rgb, leaf_mask)
+        # HSV hue: orange-brown band 0-25 + wrap-around 168-179
+        hue_r1  = cv2.inRange(hsv_u8, np.array([0,  15, 15], np.uint8),
+                                       np.array([25, 255, 255], np.uint8))
+        hue_r2  = cv2.inRange(hsv_u8, np.array([168, 15, 15], np.uint8),
+                                       np.array([179, 255, 255], np.uint8))
+        combined = cv2.bitwise_or(warm, cv2.bitwise_or(hue_r1, hue_r2))
 
-    if profile.get("use_gls_local", False):
-        combined |= _detect_gls_local_contrast(img_rgb, leaf_mask)
+        # Gate: not very dark (shadow)
+        v_leaf  = v_ch[leaf_px].astype(np.uint8)
+        v_otsu  = _otsu_1d(v_leaf)
+        bright  = (v_ch > max(v_otsu * 0.30, 18.0)).astype(np.uint8) * 255
+        combined = cv2.bitwise_and(combined, bright)
+        close_k, open_k = 3, 0
 
-    s_min      = profile.get("exclude_green_s_min", 40)
-    green_mask = cv2.inRange(hsv, np.array([28, s_min, 30]), np.array([90, 255, 255]))
-    combined   = cv2.bitwise_and(combined, cv2.bitwise_not(green_mask))
-    combined   = cv2.bitwise_and(combined, leaf_mask)
+    elif disease_class == "Blight":
+        # Signal 1 â€” local lightness deficit
+        l_u8    = np.clip(l_ch, 0, 255).astype(np.uint8)
+        l_blur  = cv2.GaussianBlur(l_u8, (31, 31), 10)
+        l_diff  = cv2.subtract(l_blur, l_u8)
+        ld_otsu = _otsu_1d(l_diff[leaf_px])
+        dark    = (l_diff.astype(np.float32) > max(ld_otsu * 0.55, 6.0)
+                   ).astype(np.uint8) * 255
 
-    close_k  = profile.get("morph_close_k", 5)
-    open_k   = profile.get("morph_open_k",  3)
+        # Signal 2 â€” saturation drop (necrotic / water-soaked tissue)
+        s_otsu2 = _otsu_1d(s_leaf)
+        low_sat = (s_ch < max(s_otsu2 * 0.55, 25.0)).astype(np.uint8) * 255
+
+        # Signal 3 â€” warm hue (tan-brown H 5-38)
+        warm_hue = cv2.inRange(hsv_u8, np.array([5, 18, 18], np.uint8),
+                                        np.array([38, 230, 240], np.uint8))
+
+        combined = cv2.bitwise_or(dark, cv2.bitwise_or(low_sat, warm_hue))
+
+        # Gates
+        v_leaf  = v_ch[leaf_px].astype(np.uint8)
+        v_otsu  = _otsu_1d(v_leaf)
+        bright  = (v_ch > max(v_otsu * 0.25, 20.0)).astype(np.uint8) * 255
+        not_dark = (l_ch > 22.0).astype(np.uint8) * 255
+        combined = cv2.bitwise_and(combined, cv2.bitwise_and(bright, not_dark))
+        close_k, open_k = 9, 5
+
+    else:  # Gray_Leaf_Spot
+        # Signal 1 â€” local saturation deficit (grey streak vs green surroundings)
+        s_u8    = np.clip(s_ch, 0, 255).astype(np.uint8)
+        s_blur  = cv2.GaussianBlur(s_u8, (21, 21), 7)
+        s_diff  = cv2.subtract(s_blur, s_u8)
+        sd_otsu = _otsu_1d(s_diff[leaf_px])
+        desat   = (s_diff.astype(np.float32) > max(sd_otsu * 0.50, 8.0)
+                   ).astype(np.uint8) * 255
+
+        # Signal 2 â€” pale/grey pixels with very low absolute saturation
+        s_otsu3 = _otsu_1d(s_leaf)
+        pale    = (s_ch < max(s_otsu3 * 0.45, 20.0)).astype(np.uint8) * 255
+        combined = cv2.bitwise_or(desat, pale)
+
+        # Gates: tan/grey hue OK, bright enough, not dark
+        tan_hue  = cv2.inRange(hsv_u8, np.array([0,  0,  40], np.uint8),
+                                        np.array([38, 255, 255], np.uint8))
+        very_pale = (s_ch < 50.0).astype(np.uint8) * 255
+        hue_ok   = cv2.bitwise_or(tan_hue, very_pale)
+        v_leaf   = v_ch[leaf_px].astype(np.uint8)
+        v_otsu   = _otsu_1d(v_leaf)
+        bright   = (v_ch > max(v_otsu * 0.30, 35.0)).astype(np.uint8) * 255
+        not_dark = (l_ch > 30.0).astype(np.uint8) * 255
+        combined = cv2.bitwise_and(combined,
+                   cv2.bitwise_and(hue_ok,
+                   cv2.bitwise_and(bright, not_dark)))
+        close_k, open_k = 7, 2
+
+    # â”€â”€ Remove green, restrict to leaf â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    combined = cv2.bitwise_and(combined, cv2.bitwise_not(green_mask))
+    combined = cv2.bitwise_and(combined, leaf_mask)
+
+    # â”€â”€ Morphological cleanup â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     kern_c   = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (close_k, close_k))
     combined = cv2.morphologyEx(combined, cv2.MORPH_CLOSE, kern_c)
     if open_k > 0:
         kern_o   = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (open_k, open_k))
         combined = cv2.morphologyEx(combined, cv2.MORPH_OPEN, kern_o)
+
+    # â”€â”€ Flood guard â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    leaf_area = int(np.count_nonzero(leaf_mask))
+    if leaf_area > 0 and int(np.count_nonzero(combined)) / leaf_area > 0.72:
+        combined = np.zeros((h, w), dtype=np.uint8)
 
     return combined
 
@@ -538,7 +292,7 @@ def segment_full_leaf(img_rgb: np.ndarray) -> np.ndarray:
     h, w   = img_rgb.shape[:2]
     cx, cy = w // 2, h // 2
 
-    # 3×3 grid of positive points covering the leaf body
+    # 3Ã—3 grid of positive points covering the leaf body
     pos = np.array([
         [cx,        cy       ],
         [cx - w//5, cy       ],
@@ -551,7 +305,7 @@ def segment_full_leaf(img_rgb: np.ndarray) -> np.ndarray:
         [cx + w//5, cy + h//5],
     ], dtype=np.float32)
 
-    # Inward negative points — avoid clipping real leaf at frame edges
+    # Inward negative points â€” avoid clipping real leaf at frame edges
     margin = 20
     neg = np.array([
         [margin,     margin   ],
@@ -570,11 +324,11 @@ def segment_full_leaf(img_rgb: np.ndarray) -> np.ndarray:
     return masks[np.argmax(scores)].astype(np.uint8)
 
 
-# ── 7. SAM2 refinement helpers ─────────────────────────────────────────────────
+# â”€â”€ 7. SAM2 refinement helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def _mask_to_sam2_logit(binary_mask: np.ndarray) -> np.ndarray:
     """
-    Convert a binary (H, W) uint8 mask → SAM2 mask_input tensor (1, 256, 256).
+    Convert a binary (H, W) uint8 mask â†’ SAM2 mask_input tensor (1, 256, 256).
     Logit values: +10 = definitely foreground, -5 = likely background.
     """
     resized = cv2.resize(binary_mask, (256, 256), interpolation=cv2.INTER_NEAREST)
@@ -705,16 +459,16 @@ def _cluster_bbox(cluster, stats, img_w, img_h, pad=24):
 # Disease-specific SAM2 thresholds
 #
 # Blight:
-#   _SPOT_THRESHOLDS: 200 → 80 — early small NCLB lesions get SAM2 refinement
-#   _CLUSTER_GAPS:     50 → 70 — yellow halo + necrotic core often have a gap
-#   _IOU_THRESHOLDS:  0.25 → 0.18 — blight rough masks are patchy across the
+#   _SPOT_THRESHOLDS: 200 â†’ 80 â€” early small NCLB lesions get SAM2 refinement
+#   _CLUSTER_GAPS:     50 â†’ 70 â€” yellow halo + necrotic core often have a gap
+#   _IOU_THRESHOLDS:  0.25 â†’ 0.18 â€” blight rough masks are patchy across the
 #     yellow-tan gradient; correct SAM2 masks score low IoU against them
-#   _EXPANSION_LIMITS: 2.0 → 2.8 — SAM2 is expected to expand to full lesion
+#   _EXPANSION_LIMITS: 2.0 â†’ 2.8 â€” SAM2 is expected to expand to full lesion
 #
 # Common_Rust:
-#   _SPOT_THRESHOLDS: 60 → 40 — catch smaller/younger pustules
-#   _IOU_THRESHOLDS: 0.25 → 0.20 — rust clusters are slightly fragmented
-#   _EXPANSION_LIMITS: 2.0 → 2.5 — minor allowance for cluster expansion
+#   _SPOT_THRESHOLDS: 60 â†’ 40 â€” catch smaller/younger pustules
+#   _IOU_THRESHOLDS: 0.25 â†’ 0.20 â€” rust clusters are slightly fragmented
+#   _EXPANSION_LIMITS: 2.0 â†’ 2.5 â€” minor allowance for cluster expansion
 #
 # Gray_Leaf_Spot: unchanged from previous fix pass
 _MIN_AREAS = {
@@ -758,7 +512,7 @@ def refine_disease_mask_with_sam2(
     - Positive points increased to n=9 and use skeleton-aware sampling for
       elongated GLS streaks.
     - Per-disease IoU and expansion thresholds (see _IOU_THRESHOLDS /
-      _EXPANSION_LIMITS) — GLS uses 0.12 / 3.5x instead of 0.25 / 2.0x.
+      _EXPANSION_LIMITS) â€” GLS uses 0.12 / 3.5x instead of 0.25 / 2.0x.
     - If all three SAM2 passes fail the acceptance test, the rough cluster_bin
       is used BUT it is also AND-ed with leaf_inset (was missing before).
     """
@@ -888,7 +642,7 @@ def refine_disease_mask_with_sam2(
         elif _ok(p2_iou, p2_r): chosen = cv2.bitwise_and(p2, leaf_inset)
         elif _ok(p1_iou, p1_r): chosen = cv2.bitwise_and(p1, leaf_inset)
         else:
-            # FIX: was missing leaf_inset AND — fallback now properly constrained
+            # FIX: was missing leaf_inset AND â€” fallback now properly constrained
             chosen = cv2.bitwise_and(cluster_bin, leaf_inset)
 
         region_mask |= chosen
@@ -897,7 +651,7 @@ def refine_disease_mask_with_sam2(
             cv2.bitwise_and(region_mask, leaf_mask))
 
 
-# ── 8. Severity Calculation ────────────────────────────────────────────────────
+# â”€â”€ 8. Severity Calculation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 _HB_ANCHORS = np.array([0, 3, 6, 12, 25, 50, 75, 87, 94, 97, 100], dtype=np.float32)
 
@@ -1000,7 +754,7 @@ def calculate_severity(
     }
 
 
-# ── 9. Overlay Encoder ────────────────────────────────────────────────────────
+# â”€â”€ 9. Overlay Encoder â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 def encode_overlay(
     img_rgb: np.ndarray,
     spot_mask: np.ndarray,
@@ -1042,7 +796,40 @@ def encode_overlay(
     return base64.b64encode(buf.getvalue()).decode("utf-8")
 
 
-# ── 10. Prediction Endpoint ────────────────────────────────────────────────────
+def encode_rough_mask(img_rgb: np.ndarray, rough_mask: np.ndarray) -> str:
+    """Cyan tint overlay showing the Otsu rough colour mask."""
+    overlay = img_rgb.copy()
+    alpha   = 0.55
+    if np.any(rough_mask > 0):
+        overlay[rough_mask > 0] = (
+            overlay[rough_mask > 0] * (1 - alpha) + np.array([0, 220, 220]) * alpha
+        ).astype(np.uint8)
+        conts, _ = cv2.findContours(rough_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        cv2.drawContours(overlay, conts, -1, (0, 180, 180), 1)
+    buf = io.BytesIO()
+    Image.fromarray(overlay).save(buf, format="JPEG", quality=88)
+    return base64.b64encode(buf.getvalue()).decode("utf-8")
+
+
+def encode_bboxes(img_rgb: np.ndarray, rough_mask: np.ndarray, leaf_mask: np.ndarray) -> str:
+    """Yellow bounding boxes around each connected component in the rough mask."""
+    overlay = img_rgb.copy()
+    leaf_c, _ = cv2.findContours(leaf_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    cv2.drawContours(overlay, leaf_c, -1, (0, 200, 0), 1)
+    num_labels, _, stats, _ = cv2.connectedComponentsWithStats(rough_mask, connectivity=8)
+    for i in range(1, num_labels):
+        if stats[i, cv2.CC_STAT_AREA] < 6:
+            continue
+        x  = stats[i, cv2.CC_STAT_LEFT]
+        y  = stats[i, cv2.CC_STAT_TOP]
+        bw = stats[i, cv2.CC_STAT_WIDTH]
+        bh = stats[i, cv2.CC_STAT_HEIGHT]
+        cv2.rectangle(overlay, (x, y), (x + bw, y + bh), (255, 220, 0), 2)
+    buf = io.BytesIO()
+    Image.fromarray(overlay).save(buf, format="JPEG", quality=88)
+    return base64.b64encode(buf.getvalue()).decode("utf-8")
+
+# â”€â”€ 10. Prediction Endpoint â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 @app.post("/predict")
 async def predict(file: UploadFile = File(...)):
     try:
@@ -1053,13 +840,15 @@ async def predict(file: UploadFile = File(...)):
             raise HTTPException(status_code=400, detail="Invalid image file.")
         img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
 
-        prediction, confidence = classify_image_with_tta(img_rgb, n_augments=6)
+        prediction = classify_image_with_tta(img_rgb, n_augments=6)
 
         severity_pct        = 0.0
         severity_label      = "N/A"
         hb_grade            = 0
         severity_score      = 0.0
         overlay_b64         = None
+        rough_mask_b64      = None
+        bboxes_b64          = None
         spot_count          = 0
         region_count        = 0
         spot_severity_pct   = 0.0
@@ -1074,6 +863,9 @@ async def predict(file: UploadFile = File(...)):
             if np.count_nonzero(leaf_mask) > 0:
                 rough_mask = create_color_mask_within_leaf(
                     img_rgb, leaf_mask, disease_class=prediction)
+
+                rough_mask_b64 = encode_rough_mask(img_rgb, rough_mask)
+                bboxes_b64     = encode_bboxes(img_rgb, rough_mask, leaf_mask)
 
                 spot_mask, region_mask = refine_disease_mask_with_sam2(
                     img_rgb, rough_mask, leaf_mask, disease_class=prediction)
@@ -1098,11 +890,12 @@ async def predict(file: UploadFile = File(...)):
 
         return {
             "prediction":           prediction,
-            "confidence":           confidence,
             "severity_percentage":  severity_pct,
             "severity_label":       severity_label,
             "hb_grade":             hb_grade,
             "severity_score":       severity_score,
+            "rough_mask_image":     rough_mask_b64,
+            "bboxes_image":         bboxes_b64,
             "sam_mask_image":       overlay_b64,
             "spot_count":           spot_count,
             "region_count":         region_count,
@@ -1119,6 +912,6 @@ async def predict(file: UploadFile = File(...)):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# ── 11. Entry Point ────────────────────────────────────────────────────────────
+# â”€â”€ 11. Entry Point â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 8000)))
