@@ -1,4 +1,4 @@
-﻿import os
+import os
 import cv2
 import numpy as np
 import base64
@@ -71,7 +71,7 @@ class CustomMobileNetV2_3(nn.Module):
 
 
 # â”€â”€ 3. Load Models â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-CLASSIFIER_FILENAME = "CustomMobileNetV2_2_best copy.pth"
+CLASSIFIER_FILENAME = "CustomMobileNetV2_2_best.pth"
 SAM2_CHECKPOINT     = "sam2.1_hiera_large.pt"
 SAM2_CONFIG         = "configs/sam2.1/sam2.1_hiera_l.yaml"
 
