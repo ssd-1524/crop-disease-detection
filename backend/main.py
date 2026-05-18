@@ -561,7 +561,7 @@ def refine_disease_mask_with_sam2(
     sam_predictor.set_image(img_rgb)
 
     def _score_mask(m: np.ndarray, ref: np.ndarray) -> tuple[float, float]:
-        m        = cv2.bitwise_and(m, leaf_inset)
+        m        = cv2.bitwise_and(m, leaf_mask)
         area     = int(np.count_nonzero(m))
         ref_area = int(np.count_nonzero(ref))
         inter    = int(np.count_nonzero(m & ref))
@@ -590,7 +590,7 @@ def refine_disease_mask_with_sam2(
                 pos_points = np.array([[int(M["m10"] / M["m00"]),
                                         int(M["m01"] / M["m00"])]], dtype=np.float32)
             else:
-                region_mask |= cv2.bitwise_and(cluster_bin, leaf_inset)
+                region_mask |= cv2.bitwise_and(cluster_bin, leaf_mask)
                 continue
 
         # FIX: add negative background points
@@ -613,7 +613,7 @@ def refine_disease_mask_with_sam2(
             p1       = m1[np.argmax(s1)].astype(np.uint8)
             p1_logit = l1[np.argmax(s1)]
         except Exception:
-            region_mask |= cv2.bitwise_and(cluster_bin, leaf_inset)
+            region_mask |= cv2.bitwise_and(cluster_bin, leaf_mask)
             continue
 
         try:
@@ -639,12 +639,12 @@ def refine_disease_mask_with_sam2(
         p2_iou, p2_r = _score_mask(p2, cluster_bin)
         p1_iou, p1_r = _score_mask(p1, cluster_bin)
 
-        if   _ok(p3_iou, p3_r): chosen = cv2.bitwise_and(p3, leaf_inset)
-        elif _ok(p2_iou, p2_r): chosen = cv2.bitwise_and(p2, leaf_inset)
-        elif _ok(p1_iou, p1_r): chosen = cv2.bitwise_and(p1, leaf_inset)
+        if   _ok(p3_iou, p3_r): chosen = cv2.bitwise_and(p3, leaf_mask)
+        elif _ok(p2_iou, p2_r): chosen = cv2.bitwise_and(p2, leaf_mask)
+        elif _ok(p1_iou, p1_r): chosen = cv2.bitwise_and(p1, leaf_mask)
         else:
-            # FIX: was missing leaf_inset AND â€” fallback now properly constrained
-            chosen = cv2.bitwise_and(cluster_bin, leaf_inset)
+            # fallback: rough colour cluster constrained to full leaf
+            chosen = cv2.bitwise_and(cluster_bin, leaf_mask)
 
         region_mask |= chosen
 
