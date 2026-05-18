@@ -4,6 +4,11 @@ import numpy as np
 import base64
 import io
 import torch
+try:
+    from skimage.morphology import skeletonize as _skeletonize
+    _HAS_SKIMAGE = True
+except ImportError:
+    _HAS_SKIMAGE = False
 import torch.nn as nn
 from torchvision.models import mobilenet_v2, MobileNet_V2_Weights
 from torchvision import transforms
@@ -362,10 +367,9 @@ def _sample_points_in_mask(binary: np.ndarray, n: int) -> np.ndarray:
         aspect = max(rw, rh) / (min(rw, rh) + 1e-6)
         use_skeleton = aspect > 2.5   # elongated shape
 
-    if use_skeleton:
+    if use_skeleton and _HAS_SKIMAGE:
         # Thin the mask to a 1-pixel skeleton and sample evenly along it
-        from skimage.morphology import skeletonize
-        skel = skeletonize(binary > 0).astype(np.uint8)
+        skel = _skeletonize(binary > 0).astype(np.uint8)
         ys, xs = np.where(skel > 0)
         if len(xs) >= n:
             indices = np.linspace(0, len(xs) - 1, n, dtype=int)
