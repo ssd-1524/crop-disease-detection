@@ -372,6 +372,22 @@ export default function ImageUploader() {
               {/* Diagnostic images */}
               {(res.rough_mask_image || res.bboxes_image || res.sam_mask_image) && (
                 <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                  <style>{`
+                    .mh-tip { position: relative; display: inline-flex; align-items: center; gap: 6px; cursor: default; }
+                    .mh-tip-box {
+                      display: none; position: absolute; bottom: calc(100% + 8px); left: 50%;
+                      transform: translateX(-50%); white-space: nowrap;
+                      background: #1c1c1f; border: 1px solid #3f3f46; border-radius: 8px;
+                      padding: 7px 12px; font-size: 11px; color: #a1a1aa; font-weight: 300;
+                      line-height: 1.5; z-index: 50; pointer-events: none;
+                      box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+                    }
+                    .mh-tip-box::after {
+                      content: ''; position: absolute; top: 100%; left: 50%; transform: translateX(-50%);
+                      border: 5px solid transparent; border-top-color: #3f3f46;
+                    }
+                    .mh-tip:hover .mh-tip-box { display: block; }
+                  `}</style>
                   {[
                     { key: "rough_mask_image", label: "Otsu Rough Mask" },
                     { key: "bboxes_image",     label: "Bounding Boxes" },
@@ -385,6 +401,41 @@ export default function ImageUploader() {
                       <div style={{ borderRadius: 12, overflow: "hidden", border: `1px solid ${T.b1}` }}>
                         <img src={`data:image/jpeg;base64,${res[key]}`} alt={label} style={{ width: "100%", display: "block" }} />
                       </div>
+                      {key === "sam_mask_image" && (
+                        <div style={{ display: "flex", gap: 8, marginTop: 8, padding: "8px 12px", borderRadius: 10, background: T.cardAlt, border: `1px solid ${T.b1}` }}>
+                          <div className="mh-tip">
+                            <div style={{ width: 12, height: 12, borderRadius: 3, background: "#ffa500", flexShrink: 0 }} />
+                            <span style={{ fontSize: 11, color: T.t3, fontWeight: 400 }}>Spots</span>
+                            <div className="mh-tip-box">
+                              <strong style={{ color: "#fbbf24" }}>Spots</strong><br />
+                              Small, discrete lesion areas (&lt; threshold px).<br />
+                              Colour-mask clusters not large enough<br />
+                              for SAM2 region refinement.
+                            </div>
+                          </div>
+                          <div style={{ width: 1, background: T.b1, flexShrink: 0 }} />
+                          <div className="mh-tip">
+                            <div style={{ width: 12, height: 12, borderRadius: 3, background: "#dc1e1e", flexShrink: 0 }} />
+                            <span style={{ fontSize: 11, color: T.t3, fontWeight: 400 }}>Regions</span>
+                            <div className="mh-tip-box">
+                              <strong style={{ color: "#f87171" }}>Regions</strong><br />
+                              Large, contiguous disease areas refined<br />
+                              by SAM2's mask predictor using bounding<br />
+                              box + point prompts.
+                            </div>
+                          </div>
+                          <div style={{ width: 1, background: T.b1, flexShrink: 0 }} />
+                          <div className="mh-tip">
+                            <div style={{ width: 12, height: 12, borderRadius: 3, background: "#00c864", flexShrink: 0 }} />
+                            <span style={{ fontSize: 11, color: T.t3, fontWeight: 400 }}>Leaf boundary</span>
+                            <div className="mh-tip-box">
+                              <strong style={{ color: "#34d399" }}>Leaf boundary</strong><br />
+                              SAM2 full-leaf segmentation outline<br />
+                              used to constrain all disease masks.
+                            </div>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>

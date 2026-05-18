@@ -782,15 +782,6 @@ def encode_overlay(
     leaf_c, _ = cv2.findContours(leaf_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     cv2.drawContours(overlay, leaf_c, -1, (0, 200, 0), 1)
 
-    h, w = overlay.shape[:2]
-    lx, ly, lh, lw = 10, h - 60, 50, 180
-    roi = overlay[ly:ly+lh, lx:lx+lw].copy()
-    cv2.rectangle(overlay, (lx, ly), (lx+lw, ly+lh), (0, 0, 0), -1)
-    overlay[ly:ly+lh, lx:lx+lw] = (roi*0.3 + overlay[ly:ly+lh, lx:lx+lw]*0.7).astype(np.uint8)
-    cv2.rectangle(overlay, (lx+8,  ly+8),  (lx+22, ly+22), (255, 165, 0), -1)
-    cv2.putText(overlay, "Spots",   (lx+28, ly+20), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255,255,255), 1, cv2.LINE_AA)
-    cv2.rectangle(overlay, (lx+8,  ly+28), (lx+22, ly+42), (220,  30, 30), -1)
-    cv2.putText(overlay, "Regions", (lx+28, ly+40), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255,255,255), 1, cv2.LINE_AA)
 
     buf = io.BytesIO()
     Image.fromarray(overlay).save(buf, format="JPEG", quality=92)
